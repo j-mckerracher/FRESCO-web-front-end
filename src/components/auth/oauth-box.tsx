@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-const dummyAuth = "timeframe_selection";
+const dummyAuth = "query_builder";
 
 function OAuthBox() {
   return (

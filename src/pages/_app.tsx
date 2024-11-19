@@ -1,4 +1,5 @@
 import "@/styles/globals.css";
+import "@/styles/spinner.css";
 import type { AppProps } from "next/app";
 import localFont from "next/font/local";
 
@@ -10,8 +11,8 @@ const microscan = localFont({
 
 export default function App({ Component, pageProps }: AppProps) {
   return (
-    <main className={`${microscan.variable}`}>
-      <Component {...pageProps} />;
+    <main className={`${microscan.variable} min-h-dvh`}>
+      <Component {...pageProps} />
     </main>
   );
 }

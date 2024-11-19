@@ -1,6 +1,7 @@
 import React from "react";
 import Image from "next/image";
 import Link from "next/link";
+import ButtonPrimary from "../ButtonPrimary";
 
 const Hero = () => {
   return (
@@ -15,10 +16,8 @@ const Hero = () => {
         />
       </div>
       <div className="mt-4 flex flex-col justify-center items-center gap-4">
-        <Link href='auth'>
-        <button className="bg-purdue-boilermakerGold text-black font-semibold px-4 py-2 rounded-full text-2xl">
-          Explore the dataset!
-        </button>
+        <Link href="query_builder">
+          <ButtonPrimary onClick={() => {}} label="Explore the dataset!" />
         </Link>
         {/* <div className="flex flex-row gap-4">
           <button className="bg-purdue-boilermakerGold text-black font-semibold px-4 py-2 rounded-full">
