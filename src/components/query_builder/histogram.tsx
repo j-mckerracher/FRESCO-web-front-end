@@ -16,54 +16,40 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
     const [dataLoaded, setDataLoaded] = useState(false);
     const [brush, setBrush] = useState<BrushValue | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const connRef = useRef<any>(null);
 
     useEffect(() => {
         const createPlot = async () => {
-            // Ensure we have all required elements
-            if (!db || loading || !readyToPlot) {
+            if (!db || loading || !readyToPlot || !plotRef.current) {
                 console.log('Waiting for requirements:', {
                     db: !!db,
                     loading,
-                    readyToPlot
+                    readyToPlot,
+                    plotRef: !!plotRef.current
                 });
                 return;
             }
 
-            // Ensure plotRef exists
-            if (!plotRef.current) {
-                console.error('Plot container ref not initialized');
-                return;
-            }
-
             try {
+                // Create and store connection
                 console.log('Creating plot connection...');
-                const conn = await db.connect();
+                connRef.current = await db.connect();
 
-                // Verify table exists
-                const tables = await conn.query("SHOW TABLES");
-                const tableExists = tables.toArray().some(row => row[0] === 'histogram');
-                if (!tableExists) {
-                    throw new Error("Histogram table not found");
-                }
+                // Set up ICU and timezone
+                await connRef.current.query("LOAD icu");
+                await connRef.current.query("SET TimeZone='America/New_York'");
 
-                // Check data stats
-                console.log('Checking data statistics...');
-                const result = await conn.query(`
+                // Check data range for binning
+                console.log('Checking data range...');
+                const rangeQuery = await connRef.current.query(`
                     SELECT 
-                        COUNT(*) as count,
                         MIN(time) as min_time,
                         MAX(time) as max_time,
-                        COUNT(DISTINCT time) as unique_times,
-                        CAST(MIN(time) AS STRING) as min_time_str,
-                        CAST(MAX(time) AS STRING) as max_time_str
-                    FROM histogram
+                        COUNT(*) as count
+                    FROM histogram_view
                 `);
-                const stats = result.toArray()[0];
-                console.log('Data statistics:', stats);
-
-                if (stats.count === 0) {
-                    throw new Error("No data found in histogram table");
-                }
+                const range = rangeQuery.toArray()[0];
+                console.log('Data range:', range);
 
                 // Set up coordinator
                 console.log('Setting up vgplot coordinator...');
@@ -71,7 +57,7 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
                 coordinator.databaseConnector(
                     vg.wasmConnector({
                         duckdb: db,
-                        connection: conn,
+                        connection: connRef.current,
                     })
                 );
 
@@ -79,13 +65,16 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
                 const brushSelection = vg.Selection.intersect();
                 setBrush(brushSelection as BrushValue);
 
-                // Create plot
+                // Create plot using the view
                 console.log('Creating plot element...');
                 const plotElement = vg.plot(
                     vg.rectY(
-                        vg.from("histogram"),
+                        vg.from("histogram_view"),
                         {
-                            x: vg.bin("time", { maxbins: 50 }).nice(),
+                            x: vg.bin("time", {
+                                maxbins: 50,
+                                extent: [range.min_time, range.max_time]
+                            }),
                             y: vg.count(),
                             inset: 0.5,
                             fill: "#CFB991",
@@ -111,7 +100,7 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
                     })
                 ) as HTMLElement;
 
-                // Clear and append plot
+                // Mount plot
                 console.log('Mounting plot...');
                 plotRef.current.innerHTML = '';
                 plotRef.current.appendChild(plotElement);
@@ -124,8 +113,14 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
             }
         };
 
-        // Initialize plot
         createPlot();
+
+        // Cleanup connection on unmount
+        return () => {
+            if (connRef.current) {
+                connRef.current.close();
+            }
+        };
     }, [db, loading, readyToPlot]);
 
     if (error) {
@@ -147,7 +142,7 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
                     onClick={() => {
                         if (brush?.value) {
                             const query = `SELECT * FROM job_data_small WHERE time BETWEEN '${
-                                brush.value[0].toISOString()
+                                    brush.value[0].toISOString()
                             }' AND '${brush.value[1].toISOString()}'`;
                             window.localStorage.setItem("SQLQuery", query);
                             window.location.href = "/data_analysis";
