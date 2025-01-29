@@ -52,14 +52,17 @@ class TimeSeriesClient {
 
     async downloadFile(url: string): Promise<Uint8Array | null> {
         const parsedUrl = new URL(url);
+        const pathParts = parsedUrl.pathname.split('/');
+        const tableName = parsedUrl.pathname.includes('timestamps')
+            ? 'timestamps'
+            : `data_${pathParts.slice(-4).join('_').split('.')[0]}`;
 
-        // Use minimal headers - all auth is in the URL
         const headers = new Headers({
             'Accept': '*/*'
         });
 
         try {
-            console.info(`Attempting to download: ${url}`);
+            console.log(`Attempting to download: ${url}`);
             const response = await fetch(url, {
                 method: 'GET',
                 headers,
@@ -69,23 +72,12 @@ class TimeSeriesClient {
 
             if (!response.ok) {
                 const errorText = await response.text();
-                const errorDetails = {
+                console.error('Download error:', {
                     status: response.status,
                     statusText: response.statusText,
                     headers: Object.fromEntries(response.headers),
                     body: errorText
-                };
-                console.error('Download error:', errorDetails);
-
-                // Parse XML error response if available
-                if (errorText.includes('<?xml')) {
-                    const parser = new DOMParser();
-                    const xmlDoc = parser.parseFromString(errorText, 'text/xml');
-                    const code = xmlDoc.querySelector('Code')?.textContent;
-                    const message = xmlDoc.querySelector('Message')?.textContent;
-                    console.error('AWS Error:', { code, message });
-                }
-
+                });
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
@@ -94,46 +86,146 @@ class TimeSeriesClient {
 
             // Handle DuckDB insertion
             if (!this.conn) {
+                console.log('Creating new connection for data insertion');
                 this.conn = await this.db.connect();
+
+                // Create s3_fresco table if it doesn't exist
+                console.log('Ensuring s3_fresco table exists...');
+                await this.conn.query(`
+                CREATE TABLE IF NOT EXISTS s3_fresco (
+                    time TIMESTAMP,
+                    submit_time TIMESTAMP,
+                    start_time TIMESTAMP,
+                    end_time TIMESTAMP,
+                    timelimit DOUBLE,
+                    nhosts BIGINT,
+                    ncores BIGINT,
+                    account VARCHAR,
+                    queue VARCHAR,
+                    host VARCHAR,
+                    jid VARCHAR,
+                    unit VARCHAR,
+                    jobname VARCHAR,
+                    exitcode VARCHAR,
+                    host_list VARCHAR,
+                    username VARCHAR,
+                    value_cpuuser DOUBLE,
+                    value_gpu DOUBLE,
+                    value_memused DOUBLE,
+                    value_memused_minus_diskcache DOUBLE,
+                    value_nfs DOUBLE,
+                    value_block DOUBLE
+                )
+            `);
+
+                // Create temporary table for loading
+                await this.conn.query(`DROP TABLE IF EXISTS temp_import`);
             }
 
-            // Parse URL for table name
-            const pathParts = parsedUrl.pathname.split('/');
-            const tableName = parsedUrl.pathname.includes('timestamps')
-                ? 'timestamps'
-                : `data_${pathParts.slice(-4).join('_').split('.')[0]}`;
-
             try {
-                await this.conn.insertArrowFromIPCStream(data, {
-                    name: tableName,
-                    create: false
-                });
-                console.info(`Successfully loaded ${tableName} into DuckDB`);
+                // First, load data into a temporary table
+                const importOpts = {
+                    name: 'temp_import',
+                    create: true,
+                };
+                await this.conn.insertArrowFromIPCStream(data, importOpts);
+
+                // Check the temp table structure
+                console.log('Temp table schema:');
+                const tempSchema = await this.conn.query('DESCRIBE temp_import');
+                console.log(tempSchema.toArray());
+
+                // Log sample of temp data
+                const tempSample = await this.conn.query('SELECT * FROM temp_import LIMIT 1');
+                console.log('Temp table sample:', tempSample.toArray());
+
+                // Transfer data with explicit casting
+                await this.conn.query(`
+                INSERT INTO s3_fresco 
+                SELECT 
+                    CAST(time AS TIMESTAMP),
+                    CAST(submit_time AS TIMESTAMP),
+                    CAST(start_time AS TIMESTAMP),
+                    CAST(end_time AS TIMESTAMP),
+                    CAST(timelimit AS DOUBLE),
+                    CAST(nhosts AS BIGINT),
+                    CAST(ncores AS BIGINT),
+                    account,
+                    queue,
+                    host,
+                    jid,
+                    unit,
+                    jobname,
+                    exitcode,
+                    host_list,
+                    username,
+                    CAST(value_cpuuser AS DOUBLE),
+                    CAST(value_gpu AS DOUBLE),
+                    CAST(value_memused AS DOUBLE),
+                    CAST(value_memused_minus_diskcache AS DOUBLE),
+                    CAST(value_nfs AS DOUBLE),
+                    CAST(value_block AS DOUBLE)
+                FROM temp_import
+            `);
+
+                // Drop temp table
+                await this.conn.query('DROP TABLE temp_import');
+
+                // Verify counts
+                const count = await this.conn.query('SELECT COUNT(*) as count FROM s3_fresco');
+                console.log(`s3_fresco now has ${count.toArray()[0].count} rows`);
+
                 return data;
             } catch (dbError) {
                 console.error(`Error loading data into DuckDB:`, dbError);
+
+                // Additional diagnostics
+                try {
+                    console.log('\nDiagnostic information:');
+                    const tables = await this.conn.query('SELECT name FROM sqlite_master WHERE type="table"');
+                    console.log('Available tables:', tables.toArray());
+
+                    // Check both temp and target tables
+                    for (const tbl of ['temp_import', 's3_fresco']) {
+                        try {
+                            const rowCount = await this.conn.query(`SELECT COUNT(*) as count FROM ${tbl}`);
+                            console.log(`${tbl} row count:`, rowCount.toArray()[0].count);
+
+                            const schema = await this.conn.query(`DESCRIBE ${tbl}`);
+                            console.log(`${tbl} schema:`, schema.toArray());
+
+                            const sample = await this.conn.query(`SELECT * FROM ${tbl} LIMIT 1`);
+                            console.log(`${tbl} sample:`, sample.toArray());
+                        } catch (e) {
+                            console.log(`Error checking ${tbl}:`, e);
+                        }
+                    }
+                } catch (diagError) {
+                    console.error('Error during diagnostics:', diagError);
+                }
                 return null;
             }
 
         } catch (error) {
             console.error(`Error downloading ${url}:`, error);
-
             if (error instanceof TypeError && error.message === 'Failed to fetch') {
                 console.error('Network error - possible causes:',
                     '\n1. Network connectivity issues',
                     '\n2. Invalid or expired AWS credentials',
                     '\n3. Incorrect request signing');
             }
-
             return null;
         }
     }
 
     async downloadContent(urls: string[]): Promise<Uint8Array[]> {
+        console.log('=== Starting downloadContent ===');
+        console.log(`Processing ${urls.length} URLs`);
+
         const downloadedFiles: Uint8Array[] = [];
         let batchSize = this.maxWorkers;
         const maxRetries = 3;
-        const initialDelay = 1000; // 1 second
+        const initialDelay = 1000;
 
         const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -156,36 +248,42 @@ class TimeSeriesClient {
             }
         };
 
-        // Process URLs in smaller batches to avoid overwhelming the server
+        // Process URLs in batches
         for (let i = 0; i < urls.length; i += batchSize) {
             const batch = urls.slice(i, i + batchSize);
-            console.info(`Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(urls.length / batchSize)}`);
+            console.log(`Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(urls.length / batchSize)}`);
 
             try {
-                // Process batch with retries
                 const downloadPromises = batch.map(url => downloadWithRetry(url));
                 const results = await Promise.allSettled(downloadPromises);
 
-                // Handle results
+                let batchSuccessCount = 0;
                 results.forEach((result, index) => {
                     if (result.status === 'fulfilled' && result.value) {
                         downloadedFiles.push(result.value);
+                        batchSuccessCount++;
                     } else {
                         const errorMessage = result.status === 'rejected' ? result.reason : 'Download failed';
                         console.warn(`Failed to download: ${batch[index]}`, errorMessage);
                     }
                 });
 
-                // Add delay between batches to prevent rate limiting
+                console.log(`Batch ${Math.floor(i / batchSize) + 1} results: ${batchSuccessCount}/${batch.length} successful`);
+
+                // Verify data after each batch
+                if (this.conn) {
+                    const count = await this.conn.query('SELECT COUNT(*) as count FROM s3_fresco');
+                    console.log(`s3_fresco total rows after batch: ${count.toArray()[0].count}`);
+                }
+
                 if (i + batchSize < urls.length) {
-                    await sleep(500); // 500ms delay between batches
+                    await sleep(500);
                 }
 
             } catch (error) {
                 console.error('Batch download error:', error);
             }
 
-            // If we've had too many failures, consider increasing delay or reducing batch size
             const successRate = downloadedFiles.length / (i + batch.length);
             if (successRate < 0.5 && batchSize > 1) {
                 batchSize = Math.max(1, Math.floor(batchSize / 2));
@@ -193,7 +291,21 @@ class TimeSeriesClient {
             }
         }
 
-        console.info(`Successfully downloaded ${downloadedFiles.length} of ${urls.length} files`);
+        console.log(`Successfully downloaded ${downloadedFiles.length} of ${urls.length} files`);
+
+        // Final verification
+        if (this.conn) {
+            try {
+                const finalCount = await this.conn.query('SELECT COUNT(*) as count FROM s3_fresco');
+                console.log(`Final s3_fresco row count: ${finalCount.toArray()[0].count}`);
+
+                const dataSample = await this.conn.query('SELECT * FROM s3_fresco LIMIT 5');
+                console.log('Data sample from s3_fresco:', dataSample.toArray());
+            } catch (e) {
+                console.error('Error during final verification:', e);
+            }
+        }
+
         return downloadedFiles;
     }
 
@@ -259,40 +371,180 @@ async function startSingleQuery(
     tableName: string,
     rowLimit: number
 ): Promise<void> {
-    const client = new TimeSeriesClient("", 10, db);
+    console.log(`\n=== Starting Query Process ===`);
+    console.log(`Query: ${sqlQuery}`);
+    console.log(`Table: ${tableName}`);
+    console.log(`Row Limit: ${rowLimit}`);
+
+    const client = new TimeSeriesClient("", 20, db);
+    let conn = null;
     try {
+        conn = await db.connect();
+
+        // First check if s3_fresco exists and has data
+        try {
+            const s3Tables = await conn.query(`SELECT name FROM sqlite_master WHERE type='table' AND name='s3_fresco'`);
+            const s3TableExists = s3Tables.toArray().length > 0;
+            console.log('s3_fresco table exists:', s3TableExists);
+
+            if (s3TableExists) {
+                const s3Count = await conn.query('SELECT COUNT(*) as count FROM s3_fresco');
+                console.log('s3_fresco row count:', s3Count.toArray()[0].count);
+
+                // Sample the data to verify structure
+                console.log('s3_fresco sample data:');
+                const s3Sample = await conn.query('SELECT * FROM s3_fresco LIMIT 2');
+                const s3Data = s3Sample.toArray();
+                console.log(s3Data);
+
+                // If we have data, let's check its date range
+                if (s3Data.length > 0) {
+                    const dateRange = await conn.query(`
+                        SELECT 
+                            MIN(time) as min_time,
+                            MAX(time) as max_time 
+                        FROM s3_fresco
+                    `);
+                    console.log('s3_fresco date range:', dateRange.toArray()[0]);
+                }
+            }
+        } catch (e) {
+            console.log('Error checking s3_fresco:', e);
+        }
+
+        // Create target table with explicit schema
+        console.log(`Creating ${tableName} table...`);
+        await conn.query(`DROP TABLE IF EXISTS ${tableName}`);
+        await conn.query(`
+            CREATE TABLE ${tableName} (
+                time TIMESTAMP,
+                submit_time TIMESTAMP,
+                start_time TIMESTAMP,
+                end_time TIMESTAMP,
+                timelimit DOUBLE,
+                nhosts BIGINT,
+                ncores BIGINT,
+                account VARCHAR,
+                queue VARCHAR,
+                host VARCHAR,
+                jid VARCHAR,
+                unit VARCHAR,
+                jobname VARCHAR,
+                exitcode VARCHAR,
+                host_list VARCHAR,
+                username VARCHAR,
+                value_cpuuser DOUBLE,
+                value_gpu DOUBLE,
+                value_memused DOUBLE,
+                value_memused_minus_diskcache DOUBLE,
+                value_nfs DOUBLE,
+                value_block DOUBLE
+            )
+        `);
+
+        console.log('Querying API for data chunks...');
         const result = await client.queryData(sqlQuery, rowLimit);
+
         if (!result.chunks || result.chunks.length === 0) {
-            console.warn('No data chunks returned from query');
+            console.warn('No data chunks returned from API query');
             return;
         }
 
-        // Download all chunks
+        console.log(`Received ${result.chunks.length} data chunks from API`);
         const urls = result.chunks.map(chunk => chunk.url);
-        const conn = await db.connect();
 
         try {
-            // First make sure base table exists
-            await conn.query(`INSERT INTO ${tableName} SELECT * FROM s3_fresco LIMIT 0`);
-
-            // Now download and insert the data
+            console.log('Starting data download and insertion...');
             await client.downloadContent(urls);
 
-            // Verify the data was loaded
-            const countResult = await conn.query(`SELECT COUNT(*) as count FROM ${tableName}`);
-            const count = countResult.toArray()[0].count;
-            console.log(`Verified ${count} rows in ${tableName} table`);
+            // After download, verify s3_fresco again
+            console.log('\nVerifying s3_fresco after download:');
+            const postCount = await conn.query('SELECT COUNT(*) as count FROM s3_fresco');
+            const s3RowCount = postCount.toArray()[0].count;
+            console.log('s3_fresco row count after download:', s3RowCount);
 
-            if (count === 0) {
-                throw new Error(`No data was loaded into ${tableName} table`);
+            if (s3RowCount > 0) {
+                // Transfer the data
+                console.log(`\nTransferring data to ${tableName}...`);
+                const insertQuery = `
+                    INSERT INTO ${tableName} 
+                    SELECT 
+                        CAST(time AS TIMESTAMP) as time,
+                        CAST(submit_time AS TIMESTAMP) as submit_time,
+                        CAST(start_time AS TIMESTAMP) as start_time,
+                        CAST(end_time AS TIMESTAMP) as end_time,
+                        timelimit,
+                        nhosts,
+                        ncores,
+                        account,
+                        queue,
+                        host,
+                        jid,
+                        unit,
+                        jobname,
+                        exitcode,
+                        host_list,
+                        username,
+                        value_cpuuser,
+                        value_gpu,
+                        value_memused,
+                        value_memused_minus_diskcache,
+                        value_nfs,
+                        value_block
+                    FROM s3_fresco 
+                    WHERE time BETWEEN '2023-02-01' AND '2023-03-01'
+                `;
+                console.log('Insert query:', insertQuery);
+                await conn.query(insertQuery);
+
+                // Verify the insert
+                const finalCount = await conn.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+                const finalRowCount = finalCount.toArray()[0].count;
+                console.log(`${tableName} final row count:`, finalRowCount);
+
+                if (finalRowCount === 0) {
+                    // Check the date filtering
+                    const dateCheck = await conn.query(`
+                        SELECT MIN(time) as min_time, MAX(time) as max_time 
+                        FROM s3_fresco
+                    `);
+                    console.log('Date range in s3_fresco:', dateCheck.toArray());
+                }
+            } else {
+                console.error('No data found in s3_fresco after download');
             }
-        } finally {
-            conn.close();
+
+        } catch (err) {
+            console.error('Error during data operations:', err);
+            throw err;
         }
 
     } catch (error) {
-        console.error('Error executing query:', error);
+        console.error('Error in startSingleQuery:', error);
+
+        // Additional error diagnostics
+        if (conn) {
+            try {
+                console.log('\n=== Debug Information ===');
+                const tables = await conn.query('SELECT name FROM sqlite_master WHERE type="table"');
+                console.log('Available tables:', tables.toArray());
+
+                for (const table of tables.toArray()) {
+                    const tableName = table[0];
+                    console.log(`\nSchema for ${tableName}:`);
+                    const schema = await conn.query(`DESCRIBE ${tableName}`);
+                    console.log(schema.toArray());
+                }
+            } catch (debugErr) {
+                console.error('Error during debug:', debugErr);
+            }
+        }
         throw error;
+    } finally {
+        if (conn) {
+            console.log('Closing database connection...');
+            conn.close();
+        }
     }
 }
 

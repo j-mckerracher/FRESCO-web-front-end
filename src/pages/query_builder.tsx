@@ -11,74 +11,138 @@ const QueryBuilder = () => {
   const [error, setError] = useState<string | null>(null);
 
   const getParquetFromAPI = useCallback(async () => {
+    console.log('=== Starting getParquetFromAPI ===');
     if (!db) {
+      console.error("DuckDB not initialized");
       setError("DuckDB not initialized");
       return;
     }
 
+    let conn = null;
     try {
-      const conn = await db.connect();
+      console.log('Creating initial database connection...');
+      conn = await db.connect();
 
-      // Create job_data_small table with explicit schema
+      // List current tables before cleanup
+      console.log('Tables before cleanup:');
+      const beforeTables = await conn.query('SHOW TABLES');
+      console.log(beforeTables.toArray());
+
+      console.log('Dropping existing tables...');
       await conn.query("DROP TABLE IF EXISTS job_data_small");
-      await conn.query(`
-        CREATE TABLE job_data_small (
-          time TIMESTAMP,
-          submit_time TIMESTAMP,
-          start_time TIMESTAMP,
-          end_time TIMESTAMP,
-          timelimit DOUBLE,
-          nhosts BIGINT,
-          ncores BIGINT,
-          account VARCHAR,
-          queue VARCHAR,
-          host VARCHAR,
-          jid VARCHAR,
-          unit VARCHAR,
-          jobname VARCHAR,
-          exitcode VARCHAR,
-          host_list VARCHAR,
-          username VARCHAR,
-          value_cpuuser DOUBLE,
-          value_gpu DOUBLE,
-          value_memused DOUBLE,
-          value_memused_minus_diskcache DOUBLE,
-          value_nfs DOUBLE,
-          value_block DOUBLE
-        )`);
+      await conn.query("DROP TABLE IF EXISTS histogram");
+
+      // Verify tables were dropped
+      console.log('Tables after cleanup:');
+      const afterTables = await conn.query('SHOW TABLES');
+      console.log(afterTables.toArray());
 
       if (!loading) {
-        // Load data from S3 directly into the table
+        console.log('Starting data load process...');
         await startSingleQuery(
-            "SELECT time FROM s3_fresco WHERE time BETWEEN '2023-02-01' AND '2023-03-01'",
+            "SELECT * FROM s3_fresco WHERE time BETWEEN '2023-02-01' AND '2023-03-01'",
             db,
             "job_data_small",
             1000000
         );
 
-        // Now create and populate histogram table
-        await conn.query("DROP TABLE IF EXISTS histogram");
-        await conn.query("CREATE TABLE histogram AS SELECT time FROM job_data_small ORDER BY time");
-
-        // Verify data was loaded
-        const result = await conn.query("SELECT COUNT(*) as count FROM histogram");
-        const count = result.toArray()[0].count;
-        console.log(`Loaded ${count} rows into histogram table`);
+        // Check job_data_small
+        console.log('Verifying job_data_small...');
+        const jobDataCount = await conn.query("SELECT COUNT(*) as count FROM job_data_small");
+        const count = jobDataCount.toArray()[0].count;
+        console.log(`job_data_small contains ${count} rows`);
 
         if (count === 0) {
-          throw new Error("No data was loaded into the histogram table");
+          throw new Error("job_data_small is empty after data load");
         }
 
-        await conn.query("LOAD icu");
-        await conn.query("SET TimeZone='America/New_York'");
+        // Sample check
+        console.log('Sample from job_data_small:');
+        const sample = await conn.query("SELECT * FROM job_data_small LIMIT 3");
+        console.log(sample.toArray());
 
-        setHistogramData(true);
+        console.log('Creating histogram table...');
+        const histConn = await db.connect();
+        try {
+          await histConn.query(`
+                    CREATE TABLE histogram AS 
+                    SELECT time 
+                    FROM job_data_small 
+                    WHERE time IS NOT NULL 
+                    ORDER BY time
+                `);
+
+          // Verify histogram data
+          console.log('Verifying histogram data...');
+          const histResult = await histConn.query("SELECT COUNT(*) as count FROM histogram");
+          const histCount = histResult.toArray()[0].count;
+          console.log(`Histogram table contains ${histCount} rows`);
+
+          if (histCount === 0) {
+            throw new Error("No data was loaded into histogram table");
+          }
+
+          // Sample check
+          console.log('Sample from histogram:');
+          const histSample = await histConn.query("SELECT * FROM histogram LIMIT 3");
+          console.log(histSample.toArray());
+
+          await histConn.query("LOAD icu");
+          await histConn.query("SET TimeZone='America/New_York'");
+
+          setHistogramData(true);
+        } catch (histErr) {
+          console.error('Error creating histogram:', histErr);
+          throw histErr;
+        } finally {
+          histConn.close();
+        }
       }
-
-      conn.close();
     } catch (err) {
-      console.error("Error loading histogram data:", err);
+      console.error("Error in getParquetFromAPI:", err);
       setError(err instanceof Error ? err.message : "Unknown error loading data");
+
+      // Diagnostic logging
+      try {
+        const debugConn = await db.connect();
+        console.log('\n=== Debug Information ===');
+
+        // Check available tables
+        console.log('Available tables:');
+        const tables = await debugConn.query("SHOW TABLES");
+        console.log(tables.toArray());
+
+        // Inspect each table
+        for (const table of tables.toArray()) {
+          const tableName = table[0];
+          try {
+            console.log(`\nInspecting table: ${tableName}`);
+
+            // Get schema
+            console.log('Schema:');
+            const schema = await debugConn.query(`DESCRIBE ${tableName}`);
+            console.log(schema.toArray());
+
+            // Get row count
+            const count = await debugConn.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+            console.log(`Row count: ${count.toArray()[0].count}`);
+
+            // Get sample data
+            console.log('Sample data:');
+            const sample = await debugConn.query(`SELECT * FROM ${tableName} LIMIT 2`);
+            console.log(sample.toArray());
+          } catch (tableErr) {
+            console.error(`Error inspecting table ${tableName}:`, tableErr);
+          }
+        }
+        debugConn.close();
+      } catch (debugErr) {
+        console.error('Error during debug logging:', debugErr);
+      }
+    } finally {
+      if (conn) {
+        conn.close();
+      }
     }
   }, [db, loading]);
 
