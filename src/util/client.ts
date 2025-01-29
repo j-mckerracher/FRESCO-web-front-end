@@ -253,14 +253,13 @@ class TimeSeriesClient {
     }
 }
 
-// This function matches the usage in the React component
 async function startSingleQuery(
     sqlQuery: string,
     db: AsyncDuckDB,
     tableName: string,
     rowLimit: number
 ): Promise<void> {
-    const client = new TimeSeriesClient("", 5, db);
+    const client = new TimeSeriesClient("", 10, db);
     try {
         const result = await client.queryData(sqlQuery, rowLimit);
         if (!result.chunks || result.chunks.length === 0) {
@@ -270,7 +269,26 @@ async function startSingleQuery(
 
         // Download all chunks
         const urls = result.chunks.map(chunk => chunk.url);
-        await client.downloadContent(urls);
+        const conn = await db.connect();
+
+        try {
+            // First make sure base table exists
+            await conn.query(`INSERT INTO ${tableName} SELECT * FROM s3_fresco LIMIT 0`);
+
+            // Now download and insert the data
+            await client.downloadContent(urls);
+
+            // Verify the data was loaded
+            const countResult = await conn.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+            const count = countResult.toArray()[0].count;
+            console.log(`Verified ${count} rows in ${tableName} table`);
+
+            if (count === 0) {
+                throw new Error(`No data was loaded into ${tableName} table`);
+            }
+        } finally {
+            conn.close();
+        }
 
     } catch (error) {
         console.error('Error executing query:', error);
