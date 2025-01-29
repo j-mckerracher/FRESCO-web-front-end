@@ -86,7 +86,7 @@ class TimeSeriesClient {
         const bufferName = `parquet_buffer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
         try {
-            console.log(`Downloading: ${url}`);
+            // console.log(`Downloading: ${url}`);
             const response = await fetch(url, {
                 method: 'GET',
                 mode: 'cors',
@@ -119,10 +119,10 @@ class TimeSeriesClient {
                     SELECT * FROM ${tempTableName};
                 `);
 
-                const count = await conn.query(`
-                    SELECT COUNT(*) as count FROM s3_fresco;
-                `);
-                console.log(`Current row count: ${count.toArray()[0].count}`);
+                // const count = await conn.query(`
+                //     SELECT COUNT(*) as count FROM s3_fresco;
+                // `);
+                // console.log(`Current row count: ${count.toArray()[0].count}`);
 
                 return true;
             } finally {

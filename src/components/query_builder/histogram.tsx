@@ -67,6 +67,7 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
 
                 // Create plot using the view
                 console.log('Creating plot element...');
+                // @ts-ignore
                 const plotElement = vg.plot(
                     vg.rectY(
                         vg.from("histogram_view"),

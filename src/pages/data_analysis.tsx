@@ -9,7 +9,8 @@ import { PlotType } from "@/components/component_types";
 import MultiSelect from "@/components/multi-select";
 import Vgmenu from "@/components/vgmenu";
 import { startSingleQuery } from "@/util/client";
-import { BounceLoader } from "react-spinners";
+import LoadingAnimation from "@/components/LoadingAnimation";
+// import { BounceLoader } from "react-spinners";
 
 const COLUMN_NAMES = [
   { value: "time", label: "Time", numerical: true, linePlot: false },
@@ -169,16 +170,7 @@ const DataAnalysis = () => {
     <div className="bg-black min-h-screen flex flex-col">
       <Header />
       {db == undefined || conn.current == undefined || dataloading ? (
-        <div className="flex flex-col justify-center align-middle min-h-[40vh] w-full">
-          <BounceLoader
-            loading={!loading}
-            color="#FFFFFF"
-            cssOverride={{
-              margin: "auto",
-            }}
-          />
-          <p className="m-auto text-xl text-white">Loading data...</p>
-        </div>
+        <LoadingAnimation />
       ) : (
         <div className="flex flex-row-reverse min-w-scren">
           <div className="w-1/4 px-4 flex flex-col  gap-4">
