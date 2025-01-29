@@ -1,107 +1,137 @@
-import * as vg from "@uwdata/vgplot";
+import { useEffect, useRef, useState } from 'react';
 import { useDuckDb } from "duckdb-wasm-kit";
-import { useCallback, useEffect, useRef, useState } from "react";
-import ButtonPrimary from "../ButtonPrimary";
-import stripTimezone from "@/util/util";
-import { useRouter } from "next/router";
+import * as vg from "@uwdata/vgplot";
 
 interface HistogramProps {
     readyToPlot: boolean;
 }
 
-const Histogram = ({ readyToPlot }: HistogramProps) => {
+interface BrushValue {
+    value?: [Date, Date];
+}
+
+const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
     const { db, loading } = useDuckDb();
-    const plotsRef = useRef<HTMLDivElement | null>(null);
-    const [width, setWidth] = useState(window.innerWidth);
-    const [height, setHeight] = useState(window.innerHeight);
-    const [brush, setBrush] = useState(null);
+    const plotRef = useRef<HTMLDivElement>(null);
     const [dataLoaded, setDataLoaded] = useState(false);
+    const [brush, setBrush] = useState<BrushValue | null>(null);
+    const [error, setError] = useState<string | null>(null);
 
-    const updateDimensions = () => {
-        setWidth(window.innerWidth);
-        setHeight(window.innerHeight);
-    };
+    useEffect(() => {
+        const createPlot = async () => {
+            // Ensure we have all required elements
+            if (!db || loading || !readyToPlot) {
+                console.log('Waiting for requirements:', {
+                    db: !!db,
+                    loading,
+                    readyToPlot
+                });
+                return;
+            }
 
-    const getData = useCallback(async () => {
-        if (db && !loading) {
+            // Ensure plotRef exists
+            if (!plotRef.current) {
+                console.error('Plot container ref not initialized');
+                return;
+            }
+
             try {
+                console.log('Creating plot connection...');
                 const conn = await db.connect();
 
-                // Verify data exists in the table
-                const result = await conn.query("SELECT COUNT(*) as count FROM histogram");
-                // DuckDB returns array of objects for query results
-                const count = result.toArray()[0].count;
-
-                if (count === 0) {
-                    console.error("No data found in histogram table");
-                    return;
+                // Verify table exists
+                const tables = await conn.query("SHOW TABLES");
+                const tableExists = tables.toArray().some(row => row[0] === 'histogram');
+                if (!tableExists) {
+                    throw new Error("Histogram table not found");
                 }
 
-                console.log(`Found ${count} rows in histogram table`);
-                setDataLoaded(true);
+                // Check data stats
+                console.log('Checking data statistics...');
+                const result = await conn.query(`
+                    SELECT 
+                        COUNT(*) as count,
+                        MIN(time) as min_time,
+                        MAX(time) as max_time,
+                        COUNT(DISTINCT time) as unique_times,
+                        CAST(MIN(time) AS STRING) as min_time_str,
+                        CAST(MAX(time) AS STRING) as max_time_str
+                    FROM histogram
+                `);
+                const stats = result.toArray()[0];
+                console.log('Data statistics:', stats);
 
-                //@ts-expect-error idk
-                vg.coordinator().databaseConnector(
+                if (stats.count === 0) {
+                    throw new Error("No data found in histogram table");
+                }
+
+                // Set up coordinator
+                console.log('Setting up vgplot coordinator...');
+                const coordinator = vg.coordinator();
+                coordinator.databaseConnector(
                     vg.wasmConnector({
                         duckdb: db,
                         connection: conn,
                     })
                 );
 
-                const brush = vg.Selection.intersect();
-                setBrush(brush);
+                // Create brush selection
+                const brushSelection = vg.Selection.intersect();
+                setBrush(brushSelection as BrushValue);
 
-                const plot = vg.plot(
-                    vg.rectY(vg.from("histogram"), {
-                        x: vg.bin("time"),
-                        y: vg.count(),
-                        inset: 1,
-                        fill: "#CFB991",
-                    }),
-                    vg.marginLeft(60),
-                    //@ts-expect-error idk
-                    vg.marginBottom(35),
-                    vg.intervalX({ as: brush }),
-                    vg.xDomain(vg.Fixed),
-                    vg.width(0.8 * width),
-                    vg.height(0.5 * height),
+                // Create plot
+                console.log('Creating plot element...');
+                const plotElement = vg.plot(
+                    vg.rectY(
+                        vg.from("histogram"),
+                        {
+                            x: vg.bin("time", { maxbins: 50 }).nice(),
+                            y: vg.count(),
+                            inset: 0.5,
+                            fill: "#CFB991",
+                        }
+                    ),
+                    vg.intervalX({ as: brushSelection }),
+                    vg.xScale('time'),
+                    vg.xLabel('Time'),
+                    vg.yLabel('Count'),
+                    vg.width(Math.min(window.innerWidth * 0.8, 1200)),
+                    vg.height(400),
                     vg.style({
-                        "font-size": "0.8rem",
+                        backgroundColor: "transparent",
+                        color: "#FFFFFF",
+                        fontSize: "14px",
+                        fontFamily: "system-ui",
+                        ".vgplot-x-axis line, .vgplot-y-axis line": {
+                            stroke: "#FFFFFF",
+                        },
+                        ".vgplot-x-axis text, .vgplot-y-axis text": {
+                            fill: "#FFFFFF",
+                        }
                     })
-                );
+                ) as HTMLElement;
 
-                //@ts-expect-error idk
-                plotsRef.current?.replaceChildren(plot);
+                // Clear and append plot
+                console.log('Mounting plot...');
+                plotRef.current.innerHTML = '';
+                plotRef.current.appendChild(plotElement);
+                setDataLoaded(true);
+                console.log('Plot mounted successfully');
+
             } catch (error) {
-                console.error("Error creating plot:", error);
-                // Log the actual table schema to debug
-                try {
-                    const schema = await conn.query("DESCRIBE histogram");
-                    console.log("Histogram table schema:", schema.toArray());
-                } catch (e) {
-                    console.error("Could not get table schema:", e);
-                }
+                console.error('Error creating plot:', error);
+                setError(error instanceof Error ? error.message : 'An unknown error occurred');
             }
-        }
-    }, [db, height, loading, width]);
+        };
 
-    const router = useRouter();
+        // Initialize plot
+        createPlot();
+    }, [db, loading, readyToPlot]);
 
-    useEffect(() => {
-        window.addEventListener("resize", updateDimensions);
-        return () => window.removeEventListener("resize", updateDimensions);
-    }, []);
-
-    useEffect(() => {
-        if (db && !loading && readyToPlot) {
-            getData();
-        }
-    }, [getData, db, loading, readyToPlot]);
-
-    if (!dataLoaded) {
+    if (error) {
         return (
-            <div className="text-white text-center">
-                <p>Loading histogram data...</p>
+            <div className="text-center p-4">
+                <p className="text-white text-lg">Error: {error}</p>
             </div>
         );
     }
@@ -109,25 +139,27 @@ const Histogram = ({ readyToPlot }: HistogramProps) => {
     return (
         <div className="flex flex-col items-center justify-center w-full">
             <h1 className="text-xl font-medium mb-14 text-white">
-                Drag across the histogram to select a slice of the dataset
+                {dataLoaded ? 'Drag across the histogram to select a slice of the dataset' : 'Loading histogram data...'}
             </h1>
-            <div className="min-h-[60vh] overflow-visible text-base" ref={plotsRef}></div>
-            <ButtonPrimary
-                onClick={() => {
-                    //@ts-expect-error idk
-                    if (brush.value) {
-                        const query = `SELECT * FROM job_data_small WHERE time BETWEEN '${stripTimezone(
-                                //@ts-expect-error idk
-                                brush.value[0]
-                        )}' AND '${stripTimezone(brush.value[1])}'`;
-                        window.localStorage.setItem("SQLQuery", query);
-                        router.push("data_analysis");
-                    } else {
-                        alert("No selection made");
-                    }
-                }}
-                label="Query dataset"
-            />
+            <div className="min-h-[60vh] w-full" ref={plotRef} />
+            {dataLoaded && (
+                <button
+                    onClick={() => {
+                        if (brush?.value) {
+                            const query = `SELECT * FROM job_data_small WHERE time BETWEEN '${
+                                brush.value[0].toISOString()
+                            }' AND '${brush.value[1].toISOString()}'`;
+                            window.localStorage.setItem("SQLQuery", query);
+                            window.location.href = "/data_analysis";
+                        } else {
+                            alert("No selection made");
+                        }
+                    }}
+                    className="mt-8 px-6 py-2 bg-[#CFB991] text-black rounded-md hover:bg-[#BFA881] transition-colors"
+                >
+                    Query dataset
+                </button>
+            )}
         </div>
     );
 };
