@@ -1,9 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+// src/components/LoadingAnimation.tsx
 
-type LoadingStage = {
-    name: string;
-    progress: number;
-};
+import React, { useEffect, useRef } from 'react';
+import type {
+    WebGLRenderer,
+    Scene,
+    PerspectiveCamera,
+    Mesh,
+    CircleGeometry,
+    RingGeometry,
+    MeshPhongMaterial
+} from 'three';
 
 interface LoadingAnimationProps {
     currentStage?: string;
@@ -14,19 +20,18 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
                                                                currentStage = "Initializing...",
                                                                progress = 0
                                                            }) => {
-    const containerRef = useRef(null);
-    const requestIdRef = useRef(null);
-    const [error, setError] = useState(null);
-    const [isThreeLoaded, setIsThreeLoaded] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const rendererRef = useRef<WebGLRenderer | null>(null);
+    const sceneRef = useRef<Scene | null>(null);
+    const cameraRef = useRef<PerspectiveCamera | null>(null);
+    const ringRef = useRef<Mesh | null>(null);
+    const progressIndicatorRef = useRef<Mesh | null>(null);
+    const animationFrameRef = useRef<number | null>(null);
 
     useEffect(() => {
-        console.log('LoadingAnimation mounted with progress:', progress);
-        let cleanup = () => {};
-
         const initThree = async () => {
             try {
                 const THREE = await import('three');
-
                 if (!containerRef.current) return;
 
                 // Scene setup
@@ -72,71 +77,82 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
                 // Position camera
                 camera.position.z = 15;
 
-                // Animation
+                // Store refs
+                rendererRef.current = renderer;
+                sceneRef.current = scene;
+                cameraRef.current = camera;
+                ringRef.current = ring;
+                progressIndicatorRef.current = progressIndicator;
+
+                // Start animation
                 const animate = () => {
-                    requestIdRef.current = requestAnimationFrame(animate);
+                    if (!ringRef.current || !progressIndicatorRef.current || !sceneRef.current || !rendererRef.current || !cameraRef.current) return;
+
+                    animationFrameRef.current = requestAnimationFrame(animate);
 
                     // Rotate ring
-                    ring.rotation.z -= 0.01;
+                    ringRef.current.rotation.z -= 0.01;
 
-                    // Update progress indicator
-                    scene.remove(progressIndicator);
-                    const newProgressGeometry = new THREE.CircleGeometry(4, 32, 0, Math.PI * 2 * (progress / 100));
-                    progressIndicator.geometry.dispose();
-                    progressIndicator.geometry = newProgressGeometry;
-                    scene.add(progressIndicator);
+                    // Update progress indicator geometry
+                    if (progressIndicatorRef.current) {
+                        const currentProgress = progress / 100;
+                        const newGeometry = new THREE.CircleGeometry(4, 32, 0, Math.PI * 2 * currentProgress);
+                        progressIndicatorRef.current.geometry.dispose();
+                        progressIndicatorRef.current.geometry = newGeometry;
+                    }
 
-                    renderer.render(scene, camera);
+                    rendererRef.current.render(sceneRef.current, cameraRef.current);
                 };
 
                 animate();
 
                 // Handle window resize
                 const handleResize = () => {
-                    camera.aspect = window.innerWidth / window.innerHeight;
-                    camera.updateProjectionMatrix();
-                    renderer.setSize(window.innerWidth, window.innerHeight);
+                    if (!cameraRef.current || !rendererRef.current) return;
+
+                    cameraRef.current.aspect = window.innerWidth / window.innerHeight;
+                    cameraRef.current.updateProjectionMatrix();
+                    rendererRef.current.setSize(window.innerWidth, window.innerHeight);
                 };
 
                 window.addEventListener('resize', handleResize);
 
-                // Set up cleanup
-                cleanup = () => {
-                    if (requestIdRef.current) {
-                        cancelAnimationFrame(requestIdRef.current);
-                    }
+                return () => {
                     window.removeEventListener('resize', handleResize);
-                    if (containerRef.current) {
-                        containerRef.current.removeChild(renderer.domElement);
+                    if (animationFrameRef.current) {
+                        cancelAnimationFrame(animationFrameRef.current);
                     }
+                    if (containerRef.current && rendererRef.current) {
+                        containerRef.current.removeChild(rendererRef.current.domElement);
+                    }
+                    // Clean up geometries and materials
                     ringGeometry.dispose();
                     ringMaterial.dispose();
                     progressGeometry.dispose();
                     progressMaterial.dispose();
                     renderer.dispose();
                 };
-
-                setIsThreeLoaded(true);
-
             } catch (err) {
                 console.error('Error setting up Three.js:', err);
-                setError(err.message);
             }
         };
 
         initThree();
+    }, []);
 
-        return () => cleanup();
+    // Update progress indicator when progress changes
+    useEffect(() => {
+        const updateProgress = async () => {
+            if (progressIndicatorRef.current && sceneRef.current) {
+                const THREE = await import('three');
+                const currentProgress = progress / 100;
+                const newGeometry = new THREE.CircleGeometry(4, 32, 0, Math.PI * 2 * currentProgress);
+                progressIndicatorRef.current.geometry.dispose();
+                progressIndicatorRef.current.geometry = newGeometry;
+            }
+        };
+        updateProgress();
     }, [progress]);
-
-    if (error) {
-        return (
-            <div className="fixed inset-0 flex flex-col items-center justify-center bg-black z-50">
-                <div className="w-12 h-12 rounded-full bg-red-500" />
-                <p className="mt-4 text-xl text-white">Error loading animation: {error}</p>
-            </div>
-        );
-    }
 
     return (
         <div className="fixed inset-0 flex flex-col items-center justify-center bg-black z-50">

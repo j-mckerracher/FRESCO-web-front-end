@@ -1,3 +1,5 @@
+// src/pages/query_builder.tsx
+
 import Header from "@/components/Header";
 import Histogram from "@/components/query_builder/histogram";
 import { startSingleQuery } from "@/util/client";
@@ -6,35 +8,26 @@ import { useCallback, useEffect, useState } from "react";
 import dynamic from 'next/dynamic';
 
 const LoadingAnimation = dynamic(
-    () => {
-        console.log('Dynamic import of LoadingAnimation initiated');
-        return import('@/components/LoadingAnimation').then(mod => {
-            console.log('LoadingAnimation module loaded successfully');
-            return mod.default;
-        });
-    },
+    () => import('@/components/LoadingAnimation'),
     {
         ssr: false,
-        loading: () => {
-            console.log('LoadingAnimation fallback rendered');
-            return (
-                <div className="fixed inset-0 flex flex-col items-center justify-center bg-black z-50">
-                    <div className="w-12 h-12 rounded-full bg-purdue-boilermakerGold animate-ping" />
-                    <p className="mt-4 text-xl text-white">Initializing...</p>
-                </div>
-            );
-        }
+        loading: () => (
+            <div className="fixed inset-0 flex flex-col items-center justify-center bg-black z-50">
+                <div className="w-12 h-12 rounded-full bg-purdue-boilermakerGold animate-ping" />
+                <p className="mt-4 text-xl text-white">Initializing...</p>
+            </div>
+        )
     }
 );
 
-// Define loading stages
+// Define loading stages with weights
 const LOADING_STAGES = {
-    INITIALIZING: { name: 'Initializing database connection', weight: 10 },
-    SETUP: { name: 'Setting up environment', weight: 10 },
-    CLEANUP: { name: 'Cleaning up existing data', weight: 10 },
-    DATA_LOAD: { name: 'Loading data from source', weight: 40 },
-    HISTOGRAM: { name: 'Creating histogram table', weight: 15 },
-    VIEW: { name: 'Setting up data view', weight: 15 }
+    INITIALIZING: { name: 'Initializing database connection', weight: 5 },
+    SETUP: { name: 'Setting up environment', weight: 5 },
+    CLEANUP: { name: 'Cleaning up existing data', weight: 5 },
+    DATA_LOAD: { name: 'Loading data from source', weight: 70 },
+    HISTOGRAM: { name: 'Creating histogram table', weight: 10 },
+    VIEW: { name: 'Setting up data view', weight: 5 }
 };
 
 const QueryBuilder = () => {
@@ -59,9 +52,7 @@ const QueryBuilder = () => {
     };
 
     const getParquetFromAPI = useCallback(async () => {
-        console.log('=== Starting getParquetFromAPI ===');
         if (!db) {
-            console.error("DuckDB not initialized");
             setError("DuckDB not initialized");
             return;
         }
@@ -69,16 +60,13 @@ const QueryBuilder = () => {
         let conn = null;
         try {
             updateProgress('INITIALIZING');
-            console.log('Creating initial database connection...');
             conn = await db.connect();
 
             updateProgress('SETUP');
-            console.log('Setting up ICU and timezone...');
             await conn.query("LOAD icu");
             await conn.query("SET TimeZone='America/New_York'");
 
-            updateProgress('CLEANUP', 50);
-            console.log('Dropping existing tables and views...');
+            updateProgress('CLEANUP');
             try {
                 await conn.query("DROP VIEW IF EXISTS histogram_view");
                 await conn.query("DROP TABLE IF EXISTS job_data_small");
@@ -86,21 +74,21 @@ const QueryBuilder = () => {
             } catch (e) {
                 console.log('No existing tables/views to drop');
             }
-            updateProgress('CLEANUP', 100);
 
             if (!loading) {
-                updateProgress('DATA_LOAD', 0);
-                console.log('Starting data load process...');
+                const onDataProgress = (loadProgress: number) => {
+                    updateProgress('DATA_LOAD', loadProgress);
+                };
+
                 await startSingleQuery(
                     "SELECT * FROM s3_fresco WHERE time BETWEEN '2023-02-01' AND '2023-02-14'",
                     db,
                     "job_data_small",
                     1000000,
-                    (loadProgress) => updateProgress('DATA_LOAD', loadProgress)
+                    onDataProgress
                 );
 
-                updateProgress('HISTOGRAM', 0);
-                console.log('Creating histogram table...');
+                updateProgress('HISTOGRAM');
                 await conn.query(`
                     CREATE TABLE histogram AS 
                     WITH preprocessed AS (
@@ -113,16 +101,13 @@ const QueryBuilder = () => {
                     WHERE time IS NOT NULL
                     ORDER BY time
                 `);
-                updateProgress('HISTOGRAM', 100);
 
-                updateProgress('VIEW', 0);
-                console.log('Creating histogram view...');
+                updateProgress('VIEW');
                 await conn.query(`
                     CREATE VIEW histogram_view AS 
                     SELECT * FROM histogram
                 `);
 
-                // Verify the view
                 const viewStats = await conn.query(`
                     SELECT COUNT(*) as count FROM histogram_view
                 `);
@@ -132,7 +117,6 @@ const QueryBuilder = () => {
                     throw new Error("No data was loaded into histogram view");
                 }
 
-                updateProgress('VIEW', 100);
                 setHistogramData(true);
             }
         } catch (err) {

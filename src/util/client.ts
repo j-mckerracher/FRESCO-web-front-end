@@ -221,13 +221,12 @@ async function startSingleQuery(
     sqlQuery: string,
     db: AsyncDuckDB,
     tableName: string,
-    rowLimit: number
+    rowLimit: number,
+    onProgress?: (progress: number) => void
 ): Promise<void> {
-    console.log('Starting query process...');
     const client = new TimeSeriesClient(20, db);
 
     try {
-        // Create initial connection
         const conn = await db.connect();
 
         // Set up the destination table
@@ -260,7 +259,29 @@ async function startSingleQuery(
         `);
 
         // Query the API and load data
-        await client.queryData(sqlQuery, rowLimit);
+        const result = await client.queryData(sqlQuery, rowLimit);
+        const results = JSON.parse(result.body);
+
+        if (results.chunks) {
+            const totalChunks = results.chunks.length;
+            let processedChunks = 0;
+
+            // Process chunks in batches
+            for (let i = 0; i < totalChunks; i += 20) {
+                const batchChunks = results.chunks.slice(i, Math.min(i + 20, totalChunks));
+
+                // Download batch of chunks
+                await client.downloadContent(batchChunks.map((chunk: { url: string }) => chunk.url));
+
+                processedChunks += batchChunks.length;
+
+                // Update progress
+                if (onProgress) {
+                    const progress = Math.round((processedChunks / totalChunks) * 100);
+                    onProgress(progress);
+                }
+            }
+        }
 
         // Transfer filtered data to destination table
         await conn.query(`
