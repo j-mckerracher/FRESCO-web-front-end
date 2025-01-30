@@ -3,12 +3,60 @@ import Histogram from "@/components/query_builder/histogram";
 import { startSingleQuery } from "@/util/client";
 import { useDuckDb } from "duckdb-wasm-kit";
 import { useCallback, useEffect, useState } from "react";
-import { BounceLoader } from "react-spinners";
+import dynamic from 'next/dynamic';
+
+const LoadingAnimation = dynamic(
+    () => {
+        console.log('Dynamic import of LoadingAnimation initiated');
+        return import('@/components/LoadingAnimation').then(mod => {
+            console.log('LoadingAnimation module loaded successfully');
+            return mod.default;
+        });
+    },
+    {
+        ssr: false,
+        loading: () => {
+            console.log('LoadingAnimation fallback rendered');
+            return (
+                <div className="fixed inset-0 flex flex-col items-center justify-center bg-black z-50">
+                    <div className="w-12 h-12 rounded-full bg-purdue-boilermakerGold animate-ping" />
+                    <p className="mt-4 text-xl text-white">Initializing...</p>
+                </div>
+            );
+        }
+    }
+);
+
+// Define loading stages
+const LOADING_STAGES = {
+    INITIALIZING: { name: 'Initializing database connection', weight: 10 },
+    SETUP: { name: 'Setting up environment', weight: 10 },
+    CLEANUP: { name: 'Cleaning up existing data', weight: 10 },
+    DATA_LOAD: { name: 'Loading data from source', weight: 40 },
+    HISTOGRAM: { name: 'Creating histogram table', weight: 15 },
+    VIEW: { name: 'Setting up data view', weight: 15 }
+};
 
 const QueryBuilder = () => {
     const { db, loading } = useDuckDb();
     const [histogramData, setHistogramData] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [loadingStage, setLoadingStage] = useState(LOADING_STAGES.INITIALIZING.name);
+    const [progress, setProgress] = useState(0);
+
+    const updateProgress = (stage: keyof typeof LOADING_STAGES, subProgress = 100) => {
+        const stages = Object.keys(LOADING_STAGES);
+        const currentStageIndex = stages.indexOf(stage);
+        const previousStagesWeight = stages
+            .slice(0, currentStageIndex)
+            .reduce((sum, s) => sum + LOADING_STAGES[s as keyof typeof LOADING_STAGES].weight, 0);
+
+        const currentStageWeight = LOADING_STAGES[stage as keyof typeof LOADING_STAGES].weight;
+        const currentProgress = (previousStagesWeight + (currentStageWeight * subProgress / 100));
+
+        setLoadingStage(LOADING_STAGES[stage as keyof typeof LOADING_STAGES].name);
+        setProgress(Math.round(currentProgress));
+    };
 
     const getParquetFromAPI = useCallback(async () => {
         console.log('=== Starting getParquetFromAPI ===');
@@ -20,120 +68,76 @@ const QueryBuilder = () => {
 
         let conn = null;
         try {
+            updateProgress('INITIALIZING');
             console.log('Creating initial database connection...');
             conn = await db.connect();
 
-            // Set up ICU and timezone first
+            updateProgress('SETUP');
             console.log('Setting up ICU and timezone...');
             await conn.query("LOAD icu");
             await conn.query("SET TimeZone='America/New_York'");
 
-            // List current tables before cleanup
-            console.log('Tables before cleanup:');
-            const beforeTables = await conn.query('SHOW TABLES');
-            console.log(beforeTables.toArray());
-
+            updateProgress('CLEANUP', 50);
             console.log('Dropping existing tables and views...');
-            // Drop view first (if exists) to avoid dependency issues
             try {
                 await conn.query("DROP VIEW IF EXISTS histogram_view");
+                await conn.query("DROP TABLE IF EXISTS job_data_small");
+                await conn.query("DROP TABLE IF EXISTS histogram");
             } catch (e) {
-                console.log('No existing view to drop');
+                console.log('No existing tables/views to drop');
             }
-            await conn.query("DROP TABLE IF EXISTS job_data_small");
-            await conn.query("DROP TABLE IF EXISTS histogram");
+            updateProgress('CLEANUP', 100);
 
             if (!loading) {
+                updateProgress('DATA_LOAD', 0);
                 console.log('Starting data load process...');
                 await startSingleQuery(
                     "SELECT * FROM s3_fresco WHERE time BETWEEN '2023-02-01' AND '2023-02-02'",
                     db,
                     "job_data_small",
-                    1000000
+                    1000000,
+                    (loadProgress) => updateProgress('DATA_LOAD', loadProgress)
                 );
 
-                // Check job_data_small
-                console.log('Verifying job_data_small...');
-                const jobDataCount = await conn.query("SELECT COUNT(*) as count FROM job_data_small");
-                const count = jobDataCount.toArray()[0].count;
-                console.log(`job_data_small contains ${count} rows`);
-
-                if (count === 0) {
-                    throw new Error("job_data_small is empty after data load");
-                }
-
-                // Create histogram table
+                updateProgress('HISTOGRAM', 0);
                 console.log('Creating histogram table...');
                 await conn.query(`
-          CREATE TABLE histogram AS 
-          WITH preprocessed AS (
-            SELECT CAST(time AS TIMESTAMP) as time
-            FROM job_data_small 
-            WHERE time IS NOT NULL
-          )
-          SELECT time
-          FROM preprocessed
-          WHERE time IS NOT NULL
-          ORDER BY time
-        `);
+                    CREATE TABLE histogram AS 
+                    WITH preprocessed AS (
+                        SELECT CAST(time AS TIMESTAMP) as time
+                        FROM job_data_small 
+                        WHERE time IS NOT NULL
+                    )
+                    SELECT time
+                    FROM preprocessed
+                    WHERE time IS NOT NULL
+                    ORDER BY time
+                `);
+                updateProgress('HISTOGRAM', 100);
 
-                // Create the view
+                updateProgress('VIEW', 0);
                 console.log('Creating histogram view...');
                 await conn.query(`
-          CREATE VIEW histogram_view AS 
-          SELECT * FROM histogram
-        `);
+                    CREATE VIEW histogram_view AS 
+                    SELECT * FROM histogram
+                `);
 
-                // Verify the view works by querying it
-                console.log('Verifying view data...');
+                // Verify the view
                 const viewStats = await conn.query(`
-          SELECT 
-            COUNT(*) as count,
-            MIN(time) as min_time,
-            MAX(time) as max_time,
-            COUNT(DISTINCT time) as unique_times
-          FROM histogram_view
-        `);
-                const stats = viewStats.toArray()[0];
-                console.log('View statistics:', stats);
+                    SELECT COUNT(*) as count FROM histogram_view
+                `);
+                const count = viewStats.toArray()[0].count;
 
-                if (stats.count === 0) {
+                if (count === 0) {
                     throw new Error("No data was loaded into histogram view");
                 }
 
-                // Sample check
-                console.log('Sample from view:');
-                const viewSample = await conn.query("SELECT * FROM histogram_view LIMIT 3");
-                console.log(viewSample.toArray());
-
+                updateProgress('VIEW', 100);
                 setHistogramData(true);
             }
         } catch (err) {
             console.error("Error in getParquetFromAPI:", err);
             setError(err instanceof Error ? err.message : "Unknown error loading data");
-
-            // Diagnostic logging
-            try {
-                const debugConn = await db.connect();
-                console.log('\n=== Debug Information ===');
-
-                console.log('Available tables:');
-                const tables = await debugConn.query("SHOW TABLES");
-                console.log(tables.toArray());
-
-                // Try to query the view directly
-                try {
-                    console.log('\nTesting view access:');
-                    const viewTest = await debugConn.query("SELECT COUNT(*) FROM histogram_view");
-                    console.log('View row count:', viewTest.toArray()[0]);
-                } catch (viewErr) {
-                    console.error('Error accessing view:', viewErr);
-                }
-
-                debugConn.close();
-            } catch (debugErr) {
-                console.error('Error during debug logging:', debugErr);
-            }
         } finally {
             if (conn) {
                 conn.close();
@@ -152,19 +156,10 @@ const QueryBuilder = () => {
             <Header />
             <div className="text-white p-2">
                 {loading || !histogramData || !db ? (
-                    <div className="flex flex-col justify-center align-middle min-h-[40vh] w-full">
-                        <BounceLoader
-                            loading={!loading}
-                            color="#FFFFFF"
-                            cssOverride={{
-                                margin: "auto",
-                            }}
-                        />
-                        <p className="m-auto text-xl">Loading data...</p>
-                        {error && (
-                            <p className="m-auto text-red-500 mt-4">Error: {error}</p>
-                        )}
-                    </div>
+                    <LoadingAnimation
+                        currentStage={loadingStage}
+                        progress={progress}
+                    />
                 ) : (
                     <Histogram readyToPlot={!loading && histogramData && !!db} />
                 )}

@@ -9,8 +9,18 @@ import { PlotType } from "@/components/component_types";
 import MultiSelect from "@/components/multi-select";
 import Vgmenu from "@/components/vgmenu";
 import { startSingleQuery } from "@/util/client";
-import LoadingAnimation from "@/components/LoadingAnimation";
-// import { BounceLoader } from "react-spinners";
+import dynamic from 'next/dynamic';
+
+// Import LoadingAnimation with no SSR
+const LoadingAnimation = dynamic(() => import('@/components/LoadingAnimation'), {
+  ssr: false,
+  loading: () => (
+      <div className="fixed inset-0 flex flex-col items-center justify-center bg-black z-50">
+        <div className="w-12 h-12 rounded-full bg-purdue-boilermakerGold animate-ping" />
+        <p className="mt-4 text-xl text-white">Loading data...</p>
+      </div>
+  )
+});
 
 const COLUMN_NAMES = [
   { value: "time", label: "Time", numerical: true, linePlot: false },
@@ -76,9 +86,11 @@ const COLUMN_NAMES = [
     linePlot: true,
   },
 ];
+
 const value_to_numerical = new Map(
-  COLUMN_NAMES.map((col) => [col.value, col.numerical])
+    COLUMN_NAMES.map((col) => [col.value, col.numerical])
 );
+
 const column_to_formatted = new Map([
   ["time", "Time"],
   ["submit_time", "Submit Time"],
@@ -105,157 +117,185 @@ const column_to_formatted = new Map([
 ]);
 
 const DataAnalysis = () => {
+  console.log('DataAnalysis component rendered');
+
   const { db, loading, error } = useDuckDb();
   const [dataloading, setDataLoading] = useState(true);
   const [histogramColumns, setHistogramColumns] = useState<
-    { value: string; label: string }[]
+      { value: string; label: string }[]
   >([{ value: "time", label: "Time" }]);
   const [linePlotColumns, setLinePlotColumns] = useState<
-    { value: string; label: string }[]
+      { value: string; label: string }[]
   >([]);
   const conn = useRef<AsyncDuckDBConnection | undefined>(undefined);
   const crossFilter = useRef(null);
 
+  // Log initial state
+  useEffect(() => {
+    console.log('Initial state:', {
+      db: !!db,
+      loading,
+      dataloading,
+      conn: !!conn.current,
+      error
+    });
+  }, []);
+
   const loadData = useCallback(async () => {
+    console.log('loadData called:', {
+      loading,
+      db: !!db,
+      dataloading,
+      conn: !!conn.current
+    });
+
     if (!loading && db && dataloading && window) {
-      setDataLoading(true);
-      conn.current = await db.connect();
-      await conn.current.query(
-        "CREATE TABLE IF NOT EXISTS job_data ( time timestamptz NULL, submit_time timestamptz NULL, start_time timestamptz NULL, end_time timestamptz NULL, timelimit float8 NULL, nhosts int8 NULL, ncores int8 NULL, account text NULL, queue text NULL, host text NULL, jid text NULL, unit text NULL, jobname text NULL, exitcode text NULL, host_list text NULL, username text NULL, value_cpuuser float8 NULL, value_gpu float8 NULL, value_memused float8 NULL, value_memused_minus_diskcache float8 NULL, value_nfs float8 NULL, value_block float8 NULL );"
-      );
+      try {
+        console.log('Starting data load');
+        setDataLoading(true);
+        conn.current = await db.connect();
 
-      console.log(window.localStorage.getItem("SQLQuery"));
-      const sqlQuery = window.localStorage.getItem("SQLQuery");
-      if (sqlQuery) {
-        await startSingleQuery(sqlQuery, db, "job_data", 500000);
-      } else {
-        console.error("SQLQuery is null");
+        console.log('Running initial query');
+        await conn.current.query(
+            "CREATE TABLE IF NOT EXISTS job_data ( time timestamptz NULL, submit_time timestamptz NULL, start_time timestamptz NULL, end_time timestamptz NULL, timelimit float8 NULL, nhosts int8 NULL, ncores int8 NULL, account text NULL, queue text NULL, host text NULL, jid text NULL, unit text NULL, jobname text NULL, exitcode text NULL, host_list text NULL, username text NULL, value_cpuuser float8 NULL, value_gpu float8 NULL, value_memused float8 NULL, value_memused_minus_diskcache float8 NULL, value_nfs float8 NULL, value_block float8 NULL );"
+        );
+
+        const sqlQuery = window.localStorage.getItem("SQLQuery");
+        console.log('SQL Query:', sqlQuery);
+
+        if (sqlQuery) {
+          await startSingleQuery(sqlQuery, db, "job_data", 500000);
+        } else {
+          console.error("SQLQuery is null");
+        }
+
+        // Your existing queries...
+        await conn.current.query("LOAD icu");
+        await conn.current.query("SET TimeZone='America/New_York'");
+        await conn.current.query("ALTER TABLE job_data ALTER time TYPE TIMESTAMP");
+        await conn.current.query("ALTER TABLE job_data ALTER submit_time TYPE TIMESTAMP");
+        await conn.current.query("ALTER TABLE job_data ALTER start_time TYPE TIMESTAMP");
+        await conn.current.query("ALTER TABLE job_data ALTER end_time TYPE TIMESTAMP");
+
+        //@ts-expect-error idk
+        vg.coordinator().databaseConnector(
+            vg.wasmConnector({
+              duckdb: db,
+              connection: conn.current,
+            })
+        );
+        crossFilter.current = vg.Selection.crossfilter();
+
+        console.log('Data load complete');
+        setDataLoading(false);
+      } catch (err) {
+        console.error('Error in loadData:', err);
+        setDataLoading(false);
       }
-      await conn.current.query("LOAD icu");
-      await conn.current.query("SET TimeZone='America/New_York'");
-      await conn.current.query(
-        "ALTER TABLE job_data ALTER time TYPE TIMESTAMP"
-      );
-      await conn.current.query(
-        "ALTER TABLE job_data ALTER submit_time TYPE TIMESTAMP"
-      );
-      await conn.current.query(
-        "ALTER TABLE job_data ALTER start_time TYPE TIMESTAMP"
-      );
-      await conn.current.query(
-        "ALTER TABLE job_data ALTER end_time TYPE TIMESTAMP"
-      );
-
-      //@ts-expect-error idk
-      vg.coordinator().databaseConnector(
-        vg.wasmConnector({
-          duckdb: db,
-          connection: conn.current,
-        })
-      );
-      crossFilter.current = vg.Selection.crossfilter();
-      setDataLoading(false);
     }
     if (error) {
-      console.log(error);
+      console.error('DuckDB Error:', error);
     }
   }, [dataloading, db, error, loading]);
 
   useEffect(() => {
     loadData();
-    // window.selection = crossFilter;
   }, [loadData]);
 
+  // Log whenever loading state changes
+  const shouldShowLoading = !db || !conn.current || dataloading;
+  console.log('Loading state:', {
+    shouldShowLoading,
+    db: !!db,
+    conn: !!conn.current,
+    dataloading,
+    loading
+  });
+
   return (
-    <div className="bg-black min-h-screen flex flex-col">
-      <Header />
-      {db == undefined || conn.current == undefined || dataloading ? (
-        <LoadingAnimation />
-      ) : (
-        <div className="flex flex-row-reverse min-w-scren">
-          <div className="w-1/4 px-4 flex flex-col  gap-4">
-            <div>
-              <h1 className="text-white text-lg">
-                Choose columns to show as histograms:
-              </h1>
-              <MultiSelect
-                options={COLUMN_NAMES}
-                selected={histogramColumns}
-                onChange={setHistogramColumns}
-                className=""
-              />
-            </div>
-            <div>
-              <h1 className="text-white text-lg">
-                Choose columns to show as line plots:
-              </h1>
-              <MultiSelect
-                options={COLUMN_NAMES.filter((item) => {
-                  return item.linePlot;
-                })}
-                selected={linePlotColumns}
-                onChange={setLinePlotColumns}
-                className=""
-              />
-            </div>
-            <Vgmenu
-              db={db}
-              conn={conn.current}
-              crossFilter={crossFilter.current}
-              dbLoading={loading}
-              dataLoading={dataloading}
-              tableName={"job_data"}
-              columnName={"host"}
-              width={1200}
-              label={"Choose a specific host: "}
-            />
-          </div>
-          <div className="flex gap-y-6 flex-row flex-wrap min-w-[25%] max-w-[75%] justify-between px-5">
-            {histogramColumns.map((col) => {
-              if (!conn.current) return null;
-              return (
-                <VgPlot
-                  key={col.value}
-                  db={db}
-                  conn={conn.current}
-                  crossFilter={crossFilter.current}
-                  dbLoading={loading}
-                  dataLoading={dataloading}
-                  tableName={"job_data"}
-                  columnName={col.value}
-                  width={0.75}
-                  height={0.4}
-                  plotType={
-                    value_to_numerical.get(col.value)
-                      ? PlotType.NumericalHistogram
-                      : PlotType.CategoricalHistogram
-                  }
-                />
-              );
-            })}
-            {linePlotColumns.map((col) => {
-              if (!conn.current) return null;
-              return (
-                <VgPlot
-                  key={col.value}
-                  db={db}
-                  conn={conn.current}
-                  crossFilter={crossFilter.current}
-                  dbLoading={loading}
-                  dataLoading={dataloading}
-                  tableName={"job_data"}
-                  xAxis="time"
-                  columnName={col.value}
-                  width={0.75}
-                  height={0.4}
-                  plotType={PlotType.LinePlot}
-                />
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
+      <div className="bg-black min-h-screen flex flex-col">
+        <Header />
+        {shouldShowLoading ? (
+            <>
+              {console.log('Rendering loading state')}
+              <LoadingAnimation />
+            </>
+        ) : (
+            <>
+              {console.log('Rendering main content')}
+              <div className="flex flex-row-reverse min-w-scren">
+                <div className="w-1/4 px-4 flex flex-col gap-4">
+                  <div>
+                    <h1 className="text-white text-lg">Choose columns to show as histograms:</h1>
+                    <MultiSelect
+                        options={COLUMN_NAMES}
+                        selected={histogramColumns}
+                        onChange={setHistogramColumns}
+                        className=""
+                    />
+                  </div>
+                  <div>
+                    <h1 className="text-white text-lg">Choose columns to show as line plots:</h1>
+                    <MultiSelect
+                        options={COLUMN_NAMES.filter((item) => item.linePlot)}
+                        selected={linePlotColumns}
+                        onChange={setLinePlotColumns}
+                        className=""
+                    />
+                  </div>
+                  <Vgmenu
+                      db={db}
+                      conn={conn.current}
+                      crossFilter={crossFilter.current}
+                      dbLoading={loading}
+                      dataLoading={dataloading}
+                      tableName={"job_data"}
+                      columnName={"host"}
+                      width={1200}
+                      label={"Choose a specific host: "}
+                  />
+                </div>
+                <div className="flex gap-y-6 flex-row flex-wrap min-w-[25%] max-w-[75%] justify-between px-5">
+                  {histogramColumns.map((col) => (
+                      <VgPlot
+                          key={col.value}
+                          db={db}
+                          conn={conn.current}
+                          crossFilter={crossFilter.current}
+                          dbLoading={loading}
+                          dataLoading={dataloading}
+                          tableName={"job_data"}
+                          columnName={col.value}
+                          width={0.75}
+                          height={0.4}
+                          plotType={
+                            value_to_numerical.get(col.value)
+                                ? PlotType.NumericalHistogram
+                                : PlotType.CategoricalHistogram
+                          }
+                      />
+                  ))}
+                  {linePlotColumns.map((col) => (
+                      <VgPlot
+                          key={col.value}
+                          db={db}
+                          conn={conn.current}
+                          crossFilter={crossFilter.current}
+                          dbLoading={loading}
+                          dataLoading={dataloading}
+                          tableName={"job_data"}
+                          xAxis="time"
+                          columnName={col.value}
+                          width={0.75}
+                          height={0.4}
+                          plotType={PlotType.LinePlot}
+                      />
+                  ))}
+                </div>
+              </div>
+            </>
+        )}
+      </div>
   );
 };
 
