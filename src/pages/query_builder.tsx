@@ -92,7 +92,7 @@ const QueryBuilder = () => {
                 updateProgress('DATA_LOAD', 0);
                 console.log('Starting data load process...');
                 await startSingleQuery(
-                    "SELECT * FROM s3_fresco WHERE time BETWEEN '2023-02-01' AND '2023-02-02'",
+                    "SELECT * FROM s3_fresco WHERE time BETWEEN '2023-02-01' AND '2023-02-14'",
                     db,
                     "job_data_small",
                     1000000,
