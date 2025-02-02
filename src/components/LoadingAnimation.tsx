@@ -1,14 +1,8 @@
-// src/components/LoadingAnimation.tsx
-
 import React, { useEffect, useRef } from 'react';
 import type {
     WebGLRenderer,
-    Scene,
     PerspectiveCamera,
-    Mesh,
-    CircleGeometry,
-    RingGeometry,
-    MeshPhongMaterial
+    LoadingManager
 } from 'three';
 
 interface LoadingAnimationProps {
@@ -22,11 +16,9 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
                                                            }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const rendererRef = useRef<WebGLRenderer | null>(null);
-    const sceneRef = useRef<Scene | null>(null);
     const cameraRef = useRef<PerspectiveCamera | null>(null);
-    const ringRef = useRef<Mesh | null>(null);
-    const progressIndicatorRef = useRef<Mesh | null>(null);
     const animationFrameRef = useRef<number | null>(null);
+    const managerRef = useRef<LoadingManager | null>(null);
 
     useEffect(() => {
         const initThree = async () => {
@@ -34,75 +26,39 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
                 const THREE = await import('three');
                 if (!containerRef.current) return;
 
+                // Create LoadingManager
+                const manager = new THREE.LoadingManager();
+                managerRef.current = manager;
+
+                manager.onProgress = (url, itemsLoaded, itemsTotal) => {
+                    const progressPercentage = (itemsLoaded / itemsTotal) * 100;
+                    console.log(`Loading progress: ${progressPercentage}%`);
+                };
+
                 // Scene setup
                 const scene = new THREE.Scene();
-                const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-                const renderer = new THREE.WebGLRenderer({
-                    antialias: true,
-                    alpha: true
-                });
-
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                renderer.setClearColor(0x000000, 0);
+                const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+                const renderer = new THREE.WebGLRenderer();
+                renderer.setSize( window.innerWidth, window.innerHeight );
                 containerRef.current.appendChild(renderer.domElement);
+                renderer.setAnimationLoop( animate );
+                document.body.appendChild( renderer.domElement );
 
-                // Create progress ring
-                const ringGeometry = new THREE.RingGeometry(4, 5, 64);
-                const ringMaterial = new THREE.MeshPhongMaterial({
-                    color: 0xCFB991,
-                    side: THREE.DoubleSide
-                });
-                const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-                scene.add(ring);
+                const geometry = new THREE.BoxGeometry( 1, 1, 1 );
+                const material = new THREE.MeshBasicMaterial( { color: 0x00ff00 } );
+                const cube = new THREE.Mesh( geometry, material );
+                scene.add( cube );
 
-                // Create progress indicator
-                const progressGeometry = new THREE.CircleGeometry(4, 32, 0, Math.PI * 2 * (progress / 100));
-                const progressMaterial = new THREE.MeshPhongMaterial({
-                    color: 0xCFB991,
-                    side: THREE.DoubleSide,
-                    transparent: true,
-                    opacity: 0.3
-                });
-                const progressIndicator = new THREE.Mesh(progressGeometry, progressMaterial);
-                scene.add(progressIndicator);
+                camera.position.z = 5;
 
-                // Add lights
-                const pointLight = new THREE.PointLight(0xffffff, 1);
-                pointLight.position.set(10, 10, 10);
-                scene.add(pointLight);
+                function animate() {
 
-                const ambientLight = new THREE.AmbientLight(0x404040);
-                scene.add(ambientLight);
+                    cube.rotation.x += 0.01;
+                    cube.rotation.y += 0.01;
 
-                // Position camera
-                camera.position.z = 15;
+                    renderer.render( scene, camera );
 
-                // Store refs
-                rendererRef.current = renderer;
-                sceneRef.current = scene;
-                cameraRef.current = camera;
-                ringRef.current = ring;
-                progressIndicatorRef.current = progressIndicator;
-
-                // Start animation
-                const animate = () => {
-                    if (!ringRef.current || !progressIndicatorRef.current || !sceneRef.current || !rendererRef.current || !cameraRef.current) return;
-
-                    animationFrameRef.current = requestAnimationFrame(animate);
-
-                    // Rotate ring
-                    ringRef.current.rotation.z -= 0.01;
-
-                    // Update progress indicator geometry
-                    if (progressIndicatorRef.current) {
-                        const currentProgress = progress / 100;
-                        const newGeometry = new THREE.CircleGeometry(4, 32, 0, Math.PI * 2 * currentProgress);
-                        progressIndicatorRef.current.geometry.dispose();
-                        progressIndicatorRef.current.geometry = newGeometry;
-                    }
-
-                    rendererRef.current.render(sceneRef.current, cameraRef.current);
-                };
+                }
 
                 animate();
 
@@ -125,11 +81,6 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
                     if (containerRef.current && rendererRef.current) {
                         containerRef.current.removeChild(rendererRef.current.domElement);
                     }
-                    // Clean up geometries and materials
-                    ringGeometry.dispose();
-                    ringMaterial.dispose();
-                    progressGeometry.dispose();
-                    progressMaterial.dispose();
                     renderer.dispose();
                 };
             } catch (err) {
@@ -140,25 +91,11 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
         initThree();
     }, []);
 
-    // Update progress indicator when progress changes
-    useEffect(() => {
-        const updateProgress = async () => {
-            if (progressIndicatorRef.current && sceneRef.current) {
-                const THREE = await import('three');
-                const currentProgress = progress / 100;
-                const newGeometry = new THREE.CircleGeometry(4, 32, 0, Math.PI * 2 * currentProgress);
-                progressIndicatorRef.current.geometry.dispose();
-                progressIndicatorRef.current.geometry = newGeometry;
-            }
-        };
-        updateProgress();
-    }, [progress]);
-
     return (
         <div className="fixed inset-0 flex flex-col items-center justify-center bg-black z-50">
             <div ref={containerRef} className="w-full h-full" />
             <p className="absolute bottom-16 text-xl text-white">
-                {currentStage} ({progress}%)
+                {currentStage} ({Math.round(progress)}%)
             </p>
         </div>
     );
