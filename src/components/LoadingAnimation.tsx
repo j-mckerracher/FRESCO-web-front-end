@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import type {
     WebGLRenderer,
-    PerspectiveCamera,
     LoadingManager
 } from 'three';
 
@@ -16,7 +15,6 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
                                                            }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const rendererRef = useRef<WebGLRenderer | null>(null);
-    const cameraRef = useRef<PerspectiveCamera | null>(null);
     const animationFrameRef = useRef<number | null>(null);
     const managerRef = useRef<LoadingManager | null>(null);
 
