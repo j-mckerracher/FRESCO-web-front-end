@@ -39,36 +39,36 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
                 const scene = new THREE.Scene();
                 const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
                 const renderer = new THREE.WebGLRenderer();
-                renderer.setSize( window.innerWidth, window.innerHeight );
+                renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
                 containerRef.current.appendChild(renderer.domElement);
+
                 renderer.setAnimationLoop( animate );
-                document.body.appendChild( renderer.domElement );
 
-                const geometry = new THREE.BoxGeometry( 1, 1, 1 );
-                const material = new THREE.MeshBasicMaterial( { color: 0x00ff00 } );
-                const cube = new THREE.Mesh( geometry, material );
-                scene.add( cube );
+                const geometry = new THREE.TorusKnotGeometry(10, 3, 100, 16);
+                const material = new THREE.MeshNormalMaterial({});
+                const torusKnot = new THREE.Mesh(geometry, material);
+                scene.add(torusKnot);
 
-                camera.position.z = 5;
+                camera.position.z = 50;
+
+                torusKnot.rotation.x = Math.PI / 4;
+                torusKnot.rotation.y = Math.PI / 6;
 
                 function animate() {
-
-                    cube.rotation.x += 0.01;
-                    cube.rotation.y += 0.01;
-
+                    torusKnot.rotation.x += 0.01;
+                    torusKnot.rotation.y += 0.01;
                     renderer.render( scene, camera );
-
                 }
 
                 animate();
 
                 // Handle window resize
                 const handleResize = () => {
-                    if (!cameraRef.current || !rendererRef.current) return;
+                    if (!camera || !renderer || !containerRef.current) return;
 
-                    cameraRef.current.aspect = window.innerWidth / window.innerHeight;
-                    cameraRef.current.updateProjectionMatrix();
-                    rendererRef.current.setSize(window.innerWidth, window.innerHeight);
+                    camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
                 };
 
                 window.addEventListener('resize', handleResize);
