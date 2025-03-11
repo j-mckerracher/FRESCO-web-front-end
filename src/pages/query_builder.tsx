@@ -93,13 +93,14 @@ const QueryBuilder = () => {
                     updateProgress('DATA_LOAD', loadProgress);
                 };
 
-                // Format dates for SQL query
-                const startStr = selectedDateRange.start.toISOString().split('T')[0];
-                const endStr = selectedDateRange.end.toISOString().split('T')[0];
+                // Format dates for SQL query - ensure proper date format with timezone
+                const startStr = selectedDateRange.start.toISOString();
+                const endStr = selectedDateRange.end.toISOString();
 
-                console.log(`Loading data from ${startStr} to ${endStr}`);
+                console.log(`DEBUG: Loading data from ${startStr} to ${endStr}`);
+                console.log(`DEBUG: Selected range type - start: ${typeof selectedDateRange.start}, end: ${typeof selectedDateRange.end}`);
 
-                // Use the selected date range in the query
+                // Use the selected date range in the query with explicit time components
                 await startSingleQuery(
                     `SELECT * FROM s3_fresco WHERE time BETWEEN '${startStr}' AND '${endStr}'`,
                     db,
@@ -109,24 +110,77 @@ const QueryBuilder = () => {
                 );
 
                 updateProgress('HISTOGRAM');
-                await conn.query(`
-                    CREATE TABLE histogram AS 
-                    WITH preprocessed AS (
-                        SELECT CAST(time AS TIMESTAMP) as time
+
+                // Check raw data
+                const dataCheck = await conn.query(`SELECT COUNT(*) as count FROM job_data_small`);
+                console.log(`DEBUG: Raw job_data_small row count: ${dataCheck.toArray()[0].count}`);
+
+                // Sample data
+                if (dataCheck.toArray()[0].count > 0) {
+                    const sampleData = await conn.query(`SELECT time FROM job_data_small LIMIT 5`);
+                    console.log(`DEBUG: Sample time values:`, sampleData.toArray().map(row => row.time));
+                }
+
+                try {
+                    console.log(`DEBUG: Creating histogram table with range ${startStr} to ${endStr}`);
+
+                    // First check if we have data
+                    const dataCountQuery = await conn.query(`SELECT COUNT(*) as count FROM job_data_small WHERE time IS NOT NULL`);
+                    const dataCount = dataCountQuery.toArray()[0].count;
+
+                    if (dataCount === 0) {
+                        throw new Error("No data with valid time values found");
+                    }
+
+                    // Create histogram with explicit timestamp conversion
+                    await conn.query(`
+                        CREATE TABLE histogram AS 
+                        SELECT 
+                            CAST(time AS TIMESTAMP) as time
                         FROM job_data_small 
                         WHERE time IS NOT NULL
-                    )
-                    SELECT time
-                    FROM preprocessed
-                    WHERE time IS NOT NULL
-                    ORDER BY time
-                `);
+                        ORDER BY time
+                    `);
+
+                    // Verify the table was created with data
+                    const histogramCount = await conn.query(`SELECT COUNT(*) as count FROM histogram`);
+                    console.log(`DEBUG: Histogram table created with ${histogramCount.toArray()[0].count} rows`);
+
+                    // Sample the data to ensure timestamps are correct
+                    const sampleHistogram = await conn.query(`SELECT time FROM histogram LIMIT 5`);
+                    console.log(`DEBUG: Sample histogram time values:`, sampleHistogram.toArray().map(row => row.time));
+
+                } catch (err) {
+                    console.error(`DEBUG: Error creating histogram table:`, err);
+                    throw err;
+                }
 
                 updateProgress('VIEW');
                 await conn.query(`
                     CREATE VIEW histogram_view AS 
                     SELECT * FROM histogram
                 `);
+
+                // Debug the histogram view
+                const histogramCheck = await conn.query(`SELECT COUNT(*) as count FROM histogram`);
+                const viewCheck = await conn.query(`SELECT COUNT(*) as count FROM histogram_view`);
+                const histCount = histogramCheck.toArray()[0].count;
+                const viewCount = viewCheck.toArray()[0].count;
+                console.log(`DEBUG: Histogram table row count: ${histCount}`);
+                console.log(`DEBUG: Histogram view row count: ${viewCount}`);
+
+                if (histCount === 0) {
+                    console.error(`DEBUG: No data in histogram table!`);
+                }
+
+                // Check time range in histogram
+                if (histCount > 0) {
+                    const rangeCheck = await conn.query(`
+                        SELECT MIN(time) as min_time, MAX(time) as max_time FROM histogram
+                    `);
+                    const range = rangeCheck.toArray()[0];
+                    console.log(`DEBUG: Histogram time range: ${range.min_time} to ${range.max_time}`);
+                }
 
                 const viewStats = await conn.query(`
                     SELECT COUNT(*) as count FROM histogram_view
@@ -157,6 +211,7 @@ const QueryBuilder = () => {
 
     // Handler for when user selects a date range and continues
     const handleDateRangeContinue = (startDate: Date, endDate: Date) => {
+        console.log(`DEBUG: Date range selected - start: ${startDate.toISOString()}, end: ${endDate.toISOString()}`);
         setSelectedDateRange({ start: startDate, end: endDate });
         setCurrentStep(WorkflowStep.HISTOGRAM_VIEW);
     };
@@ -195,11 +250,19 @@ const QueryBuilder = () => {
                                     <p className="text-white text-sm mt-1">
                                         Viewing data from{" "}
                                         <span className="font-semibold">
-                                            {selectedDateRange?.start.toLocaleDateString()}
+                                            {selectedDateRange?.start.toLocaleDateString(undefined, {
+                                                year: 'numeric',
+                                                month: '2-digit',
+                                                day: '2-digit'
+                                            })}
                                         </span>{" "}
                                         to{" "}
                                         <span className="font-semibold">
-                                            {selectedDateRange?.end.toLocaleDateString()}
+                                            {selectedDateRange?.end.toLocaleDateString(undefined, {
+                                                year: 'numeric',
+                                                month: '2-digit',
+                                                day: '2-digit'
+                                            })}
                                         </span>
                                     </p>
                                 </div>

@@ -60,7 +60,7 @@ const DateRangeSelector: React.FC<DateRangeSelectorProps> = ({
                     </label>
                     <input
                         id="start-date"
-                        type="date"
+                        type="datetime-local"
                         value={startDate}
                         onChange={(e) => setStartDate(e.target.value)}
                         className="p-3 rounded bg-zinc-800 text-white border border-zinc-700 focus:border-purdue-boilermakerGold focus:outline-none"
@@ -73,7 +73,7 @@ const DateRangeSelector: React.FC<DateRangeSelectorProps> = ({
                     </label>
                     <input
                         id="end-date"
-                        type="date"
+                        type="datetime-local"
                         value={endDate}
                         onChange={(e) => setEndDate(e.target.value)}
                         className="p-3 rounded bg-zinc-800 text-white border border-zinc-700 focus:border-purdue-boilermakerGold focus:outline-none"
