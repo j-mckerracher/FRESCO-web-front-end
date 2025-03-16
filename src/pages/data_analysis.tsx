@@ -1,3 +1,4 @@
+// src/pages/data_analysis.tsx
 "use client";
 import * as vg from "@uwdata/vgplot";
 import Header from "@/components/Header";
@@ -9,6 +10,7 @@ import { PlotType } from "@/components/component_types";
 import MultiSelect from "@/components/multi-select";
 import Vgmenu from "@/components/vgmenu";
 import dynamic from 'next/dynamic';
+import { exportDataAsCSV } from "@/util/export";
 
 // Import LoadingAnimation with no SSR
 const LoadingAnimation = dynamic(() => import('@/components/LoadingAnimation'), {
@@ -67,6 +69,7 @@ const DataAnalysis = () => {
   const { db, loading, error } = useDuckDb();
   const [dataloading, setDataLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const [histogramColumns, setHistogramColumns] = useState<
       { value: string; label: string }[]
   >([{ value: "time", label: "Time" }]);
@@ -75,6 +78,31 @@ const DataAnalysis = () => {
   >([]);
   const conn = useRef<AsyncDuckDBConnection | undefined>(undefined);
   const crossFilter = useRef<any>(null);
+
+  // Handle CSV download
+  const handleDownload = async () => {
+    if (!conn.current) {
+      alert("Database connection not available");
+      return;
+    }
+
+    try {
+      setDownloading(true);
+
+      // Generate filename with date
+      const now = new Date();
+      const dateString = now.toISOString().split('T')[0];
+      const fileName = `fresco-data-${dateString}`;
+
+      // Note: We're not applying any filters - this downloads all data
+      await exportDataAsCSV(conn.current, "job_data", fileName);
+    } catch (error) {
+      console.error("Download error:", error);
+      alert("Failed to download data: " + (error instanceof Error ? error.message : "Unknown error"));
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   // Function to create sample data
   const createDemoData = async (connection: AsyncDuckDBConnection) => {
@@ -182,74 +210,107 @@ const DataAnalysis = () => {
 
         // If using demo data or no query exists, create demo data directly
         let shouldCreateDemoData = useDemoData;
+        let dataLoaded = false;
 
-        if (!shouldCreateDemoData && !window.localStorage.getItem("SQLQuery")) {
-          console.log("No query found in localStorage, using demo data");
-          shouldCreateDemoData = true;
-        }
+        if (!shouldCreateDemoData) {
+          console.log("Checking for S3 data from query builder...");
 
-        if (shouldCreateDemoData) {
-          await createDemoData(conn.current);
-        } else {
-          // Try to run the stored query
-          const sqlQuery = window.localStorage.getItem("SQLQuery");
-          console.log('SQL Query:', sqlQuery);
-
+          // First, check if job_data_small exists by actually running a query
+          // This is more reliable than checking for existence
           try {
-            // Create job_data table first
-            await conn.current.query(`
-              CREATE TABLE IF NOT EXISTS job_data (
-                time TIMESTAMP,
-                nhosts BIGINT,
-                ncores BIGINT,
-                account VARCHAR,
-                queue VARCHAR,
-                host VARCHAR,
-                value_cpuuser DOUBLE,
-                value_memused DOUBLE
-              )
+            // Drop existing job_data if it exists
+            await conn.current.query("DROP TABLE IF EXISTS job_data");
+
+            // First try to see if the table exists by running a simple count query
+            const result = await conn.current.query(`
+              SELECT COUNT(*) as count FROM job_data_small
             `);
 
-            // Try to load data from job_data_small
-            try {
+            const count = result.toArray()[0].count;
+            console.log(`Found job_data_small table with ${count} rows`);
+
+            if (count > 0) {
+              // Copy the data directly into job_data
+              console.log("Creating job_data from job_data_small...");
               await conn.current.query(`
-                SELECT COUNT(*) FROM job_data_small LIMIT 1
+                CREATE TABLE job_data AS
+                SELECT * FROM job_data_small
               `);
 
-              // If this succeeded, copy data from job_data_small to job_data
-              await conn.current.query(`
-                INSERT INTO job_data (
-                  time, nhosts, ncores, account, queue, host, value_cpuuser, value_memused
-                )
-                SELECT 
-                  time, nhosts, ncores, account, queue, host, value_cpuuser, value_memused
-                FROM job_data_small
+              // Verify copy was successful
+              const verifyResult = await conn.current.query(`
+                SELECT COUNT(*) as count FROM job_data
               `);
-            } catch (err) {
-              console.log("job_data_small doesn't exist, trying direct query");
 
-              // If job_data_small doesn't exist, try direct queries that might be in localStorage
-              if (sqlQuery) {
-                // Execute the query but ignore its results
-                await conn.current.query(sqlQuery);
+              const newCount = verifyResult.toArray()[0].count;
+              console.log(`Successfully created job_data with ${newCount} rows`);
+
+              if (newCount > 0) {
+                dataLoaded = true;
+              } else {
+                throw new Error("job_data was created but has 0 rows");
               }
-            }
-
-            // Check if any data was loaded
-            const countCheck = await conn.current.query("SELECT COUNT(*) as count FROM job_data");
-            const rowCount = countCheck.toArray()[0].count;
-            console.log(`Query executed with ${rowCount} rows`);
-
-            // If no data was found, create demo data
-            if (rowCount === 0) {
-              console.log("No data returned from query, creating demo data");
-              await createDemoData(conn.current);
+            } else {
+              console.log("job_data_small exists but is empty");
             }
           } catch (err) {
-            console.error("Error executing stored query:", err);
-            // Fall back to creating demo data
-            await createDemoData(conn.current);
+            // If error contains message about table not existing
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            if (errorMessage.includes("does not exist")) {
+              console.log("job_data_small table doesn't exist, checking for query...");
+
+              // Try to run a stored query if available
+              const sqlQuery = window.localStorage.getItem("SQLQuery");
+              if (sqlQuery) {
+                try {
+                  console.log("Found SQL query, attempting to execute:", sqlQuery);
+
+                  // Create job_data table first
+                  await conn.current.query(`
+                    CREATE TABLE IF NOT EXISTS job_data (
+                      time TIMESTAMP,
+                      nhosts BIGINT,
+                      ncores BIGINT,
+                      account VARCHAR,
+                      queue VARCHAR,
+                      host VARCHAR,
+                      value_cpuuser DOUBLE,
+                      value_memused DOUBLE
+                    )
+                  `);
+
+                  // Try to execute the query directly and insert results into job_data
+                  // Note: This is likely to fail since s3_fresco might not be accessible this way
+                  // But we'll try it anyway
+                  await conn.current.query(`
+                    INSERT INTO job_data
+                    ${sqlQuery}
+                  `);
+
+                  // Check if any data was loaded
+                  const countCheck = await conn.current.query("SELECT COUNT(*) as count FROM job_data");
+                  const rowCount = countCheck.toArray()[0].count;
+                  console.log(`Query executed with ${rowCount} rows`);
+
+                  if (rowCount > 0) {
+                    dataLoaded = true;
+                  }
+                } catch (queryErr) {
+                  console.error("Error executing stored query:", queryErr);
+                }
+              } else {
+                console.log("No SQL query found in localStorage");
+              }
+            } else {
+              console.error("Error checking job_data_small:", err);
+            }
           }
+        }
+
+        // If we haven't loaded data yet, create demo data
+        if (!dataLoaded) {
+          console.log("No data loaded yet, creating demo data");
+          await createDemoData(conn.current);
         }
 
         // Verify data was loaded
@@ -340,6 +401,21 @@ const DataAnalysis = () => {
         ) : (
             <>
               {console.log('Rendering main content')}
+              {/* Add download button at the top */}
+              <div className="flex justify-end p-4">
+                <button
+                    onClick={handleDownload}
+                    disabled={downloading}
+                    className={`px-4 py-2 rounded-md transition-colors ${
+                        downloading
+                            ? 'bg-gray-500 cursor-not-allowed'
+                            : 'bg-purdue-boilermakerGold text-black hover:bg-purdue-rush'
+                    }`}
+                >
+                  {downloading ? 'Downloading...' : 'Download Data as CSV'}
+                </button>
+              </div>
+
               <div className="flex flex-row-reverse min-w-scren">
                 <div className="w-1/4 px-4 flex flex-col gap-4">
                   <div>

@@ -229,6 +229,10 @@ async function startSingleQuery(
     try {
         const conn = await db.connect();
 
+        // Extract time bounds from the SQL query
+        const timeBounds = extractTimeBounds(sqlQuery);
+        console.log(`Extracted time bounds: ${timeBounds.start} to ${timeBounds.end}`);
+
         // Set up the destination table
         await conn.query(`DROP TABLE IF EXISTS ${tableName};`);
         await conn.query(`
@@ -283,11 +287,19 @@ async function startSingleQuery(
             }
         }
 
-        // Transfer filtered data to destination table
+        // Check if s3_fresco table has data
+        const sourceCount = await conn.query(`SELECT COUNT(*) as count FROM s3_fresco;`);
+        console.log(`Source table contains ${sourceCount.toArray()[0].count} rows`);
+
+        // Get sample time values to debug
+        const timeSample = await conn.query(`SELECT time FROM s3_fresco ORDER BY time LIMIT 5;`);
+        console.log(`Sample time values:`, timeSample.toArray().map(row => row.time));
+
+        // Transfer filtered data to destination table using the extracted time bounds
         await conn.query(`
             INSERT INTO ${tableName} 
             SELECT * FROM s3_fresco 
-            WHERE time BETWEEN '2023-02-01' AND '2023-03-01';
+            WHERE time BETWEEN '${timeBounds.start}' AND '${timeBounds.end}';
         `);
 
         // Verify the data transfer
@@ -299,6 +311,30 @@ async function startSingleQuery(
         console.error('Error in startSingleQuery:', error);
         throw error;
     }
+}
+
+// Helper function to extract time bounds from query
+function extractTimeBounds(query: string) {
+    const timePattern = /time\s+BETWEEN\s+'([^']+)'\s+AND\s+'([^']+)'/i;
+    const match = query.match(timePattern);
+
+    if (match && match.length >= 3) {
+        return {
+            start: match[1],
+            end: match[2]
+        };
+    }
+
+    // Default to a reasonable fallback if pattern doesn't match
+    console.error('Failed to extract time bounds from query:', query);
+    const now = new Date();
+    const oneMonthAgo = new Date(now);
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+
+    return {
+        start: oneMonthAgo.toISOString(),
+        end: now.toISOString()
+    };
 }
 
 export { TimeSeriesClient, startSingleQuery };

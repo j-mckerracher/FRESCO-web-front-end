@@ -230,7 +230,7 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
                             console.log(`DEBUG: Selected time range: ${startTime} to ${endTime}`);
 
                             const query = `SELECT * FROM job_data_small WHERE time BETWEEN '${
-                                    brush.value[0].toISOString()
+                                brush.value[0].toISOString()
                             }' AND '${brush.value[1].toISOString()}'`;
 
                             window.localStorage.setItem("SQLQuery", query);

@@ -99,81 +99,10 @@ const QueryBuilder = () => {
 
                 console.log(`DEBUG: Loading data from ${startStr} to ${endStr}`);
 
-                // This is our test data - we're creating a simple sample dataset
-                // This helps when the S3 data might not be available or when testing
-                updateProgress('DATA_LOAD', 50);
+                updateProgress('DATA_LOAD', 10);
 
                 try {
-                    // Create sample data for testing when API data isn't available
-                    await conn.query(`
-                        CREATE TABLE job_data_small (
-                            time TIMESTAMP,
-                            submit_time TIMESTAMP,
-                            start_time TIMESTAMP,
-                            end_time TIMESTAMP,
-                            timelimit DOUBLE,
-                            nhosts BIGINT,
-                            ncores BIGINT,
-                            account VARCHAR,
-                            queue VARCHAR,
-                            host VARCHAR,
-                            jid VARCHAR,
-                            unit VARCHAR,
-                            jobname VARCHAR,
-                            exitcode VARCHAR,
-                            host_list VARCHAR,
-                            username VARCHAR,
-                            value_cpuuser DOUBLE,
-                            value_gpu DOUBLE,
-                            value_memused DOUBLE,
-                            value_memused_minus_diskcache DOUBLE,
-                            value_nfs DOUBLE,
-                            value_block DOUBLE
-                        )
-                    `);
-
-                    // Insert sample data covering the selected date range
-                    const startDate = new Date(startStr);
-                    const endDate = new Date(endStr);
-                    const dayDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-
-                    // Generate sample data points - approx 100 per day
-                    const totalPoints = dayDiff * 100;
-                    const timeInterval = (endDate.getTime() - startDate.getTime()) / totalPoints;
-
-                    for (let i = 0; i < totalPoints; i++) {
-                        const pointTime = new Date(startDate.getTime() + (i * timeInterval));
-                        const cpuValue = 50 + 40 * Math.sin(i / (totalPoints / 10));
-                        const memValue = 30 + 20 * Math.cos(i / (totalPoints / 15));
-
-                        await conn.query(`
-                            INSERT INTO job_data_small (
-                                time, nhosts, ncores, account, queue, host, value_cpuuser, value_memused
-                            ) VALUES (
-                                '${pointTime.toISOString()}', 
-                                ${1 + Math.floor(Math.random() * 4)}, 
-                                ${4 + Math.floor(Math.random() * 28)}, 
-                                'research_${["cs", "physics", "bio"][Math.floor(Math.random() * 3)]}', 
-                                '${["normal", "high", "low"][Math.floor(Math.random() * 3)]}', 
-                                'node${100 + Math.floor(Math.random() * 100)}', 
-                                ${cpuValue}, 
-                                ${memValue}
-                            )
-                        `);
-
-                        // Update progress periodically
-                        if (i % 100 === 0) {
-                            updateProgress('DATA_LOAD', 50 + (i / totalPoints) * 50);
-                        }
-                    }
-
-                    console.log(`DEBUG: Created sample data with ${totalPoints} points`);
-
-                } catch (error) {
-                    console.error("Error creating sample data:", error);
-
-                    // Try the real data source if sample creation fails
-                    console.log("Falling back to real data source");
+                    // Try to fetch real data
                     await startSingleQuery(
                         `SELECT * FROM s3_fresco WHERE time BETWEEN '${startStr}' AND '${endStr}'`,
                         db,
@@ -181,40 +110,55 @@ const QueryBuilder = () => {
                         1000000,
                         onDataProgress
                     );
-                }
 
-                updateProgress('HISTOGRAM');
+                    // Check if we got data
+                    const dataCheck = await conn.query(`SELECT COUNT(*) as count FROM job_data_small`);
+                    const initialDataCount = dataCheck.toArray()[0].count;
 
-                // Check raw data
-                const dataCheck = await conn.query(`SELECT COUNT(*) as count FROM job_data_small`);
-                console.log(`DEBUG: Raw job_data_small row count: ${dataCheck.toArray()[0].count}`);
+                    // If no records, show a user-friendly error
+                    if (initialDataCount === 0) {
+                        // Check specifically for Jan 5, 2023 data
+                        const jan5Check = await conn.query(`
+                        SELECT COUNT(*) as count FROM s3_fresco
+                        WHERE time >= '2023-01-05' AND time < '2023-01-06'
+                    `);
+                        const jan5Count = jan5Check.toArray()[0].count;
 
-                // Sample data
-                if (dataCheck.toArray()[0].count > 0) {
+                        let errorMessage = "";
+
+                        // Format dates for display
+                        const formattedStart = selectedDateRange.start.toLocaleString();
+                        const formattedEnd = selectedDateRange.end.toLocaleString();
+
+                        if (jan5Count > 0) {
+                            // We have data for Jan 5 but not for the selected range
+                            errorMessage = `No data found for the selected time range (${formattedStart} to ${formattedEnd}). However, data is available for January 5, 2023.`;
+                        } else {
+                            // We might not have any data at all
+                            errorMessage = `No data found for the selected time range (${formattedStart} to ${formattedEnd}). Try selecting January 5, 2023 as a start date, as we know data exists for that date.`;
+                        }
+
+                        throw new Error(errorMessage);
+                    }
+
+                    // Continue with histogram creation if we have data
+                    updateProgress('HISTOGRAM');
+
+                    // Sample data for debugging
                     const sampleData = await conn.query(`SELECT time FROM job_data_small LIMIT 5`);
                     console.log(`DEBUG: Sample time values:`, sampleData.toArray().map(row => row.time));
-                }
 
-                try {
                     console.log(`DEBUG: Creating histogram table with range ${startStr} to ${endStr}`);
-
-                    // First check if we have data
-                    const dataCountQuery = await conn.query(`SELECT COUNT(*) as count FROM job_data_small WHERE time IS NOT NULL`);
-                    const dataCount = dataCountQuery.toArray()[0].count;
-
-                    if (dataCount === 0) {
-                        throw new Error("No data with valid time values found");
-                    }
 
                     // Create histogram with explicit timestamp conversion
                     await conn.query(`
-                        CREATE TABLE histogram AS 
-                        SELECT 
-                            CAST(time AS TIMESTAMP) as time
-                        FROM job_data_small 
-                        WHERE time IS NOT NULL
-                        ORDER BY time
-                    `);
+                CREATE TABLE histogram AS 
+                SELECT 
+                    CAST(time AS TIMESTAMP) as time
+                FROM job_data_small 
+                WHERE time IS NOT NULL
+                ORDER BY time
+            `);
 
                     // Verify the table was created with data
                     const histogramCount = await conn.query(`SELECT COUNT(*) as count FROM histogram`);
@@ -224,59 +168,75 @@ const QueryBuilder = () => {
                     const sampleHistogram = await conn.query(`SELECT time FROM histogram LIMIT 5`);
                     console.log(`DEBUG: Sample histogram time values:`, sampleHistogram.toArray().map(row => row.time));
 
-                } catch (err) {
-                    console.error(`DEBUG: Error creating histogram table:`, err);
-                    throw err;
-                }
+                    updateProgress('VIEW');
+                    await conn.query(`
+                CREATE VIEW histogram_view AS 
+                SELECT * FROM histogram
+            `);
 
-                updateProgress('VIEW');
-                await conn.query(`
-                    CREATE VIEW histogram_view AS 
-                    SELECT * FROM histogram
+                    // Debug the histogram view
+                    const histogramCheck = await conn.query(`SELECT COUNT(*) as count FROM histogram`);
+                    const viewCheck = await conn.query(`SELECT COUNT(*) as count FROM histogram_view`);
+                    const histCount = histogramCheck.toArray()[0].count;
+                    const viewCount = viewCheck.toArray()[0].count;
+                    console.log(`DEBUG: Histogram table row count: ${histCount}`);
+                    console.log(`DEBUG: Histogram view row count: ${viewCount}`);
+
+                    if (histCount === 0) {
+                        console.error(`DEBUG: No data in histogram table!`);
+                        throw new Error("No data available for visualization");
+                    }
+
+                    // Check time range in histogram
+                    if (histCount > 0) {
+                        const rangeCheck = await conn.query(`
+                    SELECT MIN(time) as min_time, MAX(time) as max_time FROM histogram
                 `);
+                        const range = rangeCheck.toArray()[0];
+                        console.log(`DEBUG: Histogram time range: ${range.min_time} to ${range.max_time}`);
+                    }
 
-                // Debug the histogram view
-                const histogramCheck = await conn.query(`SELECT COUNT(*) as count FROM histogram`);
-                const viewCheck = await conn.query(`SELECT COUNT(*) as count FROM histogram_view`);
-                const histCount = histogramCheck.toArray()[0].count;
-                const viewCount = viewCheck.toArray()[0].count;
-                console.log(`DEBUG: Histogram table row count: ${histCount}`);
-                console.log(`DEBUG: Histogram view row count: ${viewCount}`);
+                    const viewStats = await conn.query(`
+                SELECT COUNT(*) as count FROM histogram_view
+            `);
+                    const viewRowCount = viewStats.toArray()[0].count;
 
-                if (histCount === 0) {
-                    console.error(`DEBUG: No data in histogram table!`);
-                    throw new Error("No data available for visualization");
+                    if (viewRowCount === 0) {
+                        throw new Error("No data was loaded into histogram view");
+                    }
+
+                    setHistogramData(true);
+
+                } catch (error) {
+                    console.error("Error fetching or processing data:", error);
+
+                    // If it's an API error about no data found, show that error to the user
+                    const errorMessage = error instanceof Error ? error.message : "Unknown error loading data";
+
+                    if (errorMessage.includes("No data found")) {
+                        setError(errorMessage);
+                    } else {
+                        setError(`Error loading data: ${errorMessage}. Try selecting January 5, 2023 as a start date, as we know data exists for that date.`);
+                    }
+
+                    // Don't generate sample data, just propagate the error
+                    throw error;
                 }
-
-                // Check time range in histogram
-                if (histCount > 0) {
-                    const rangeCheck = await conn.query(`
-                        SELECT MIN(time) as min_time, MAX(time) as max_time FROM histogram
-                    `);
-                    const range = rangeCheck.toArray()[0];
-                    console.log(`DEBUG: Histogram time range: ${range.min_time} to ${range.max_time}`);
-                }
-
-                const viewStats = await conn.query(`
-                    SELECT COUNT(*) as count FROM histogram_view
-                `);
-                const count = viewStats.toArray()[0].count;
-
-                if (count === 0) {
-                    throw new Error("No data was loaded into histogram view");
-                }
-
-                setHistogramData(true);
             }
         } catch (err) {
             console.error("Error in getParquetFromAPI:", err);
-            setError(err instanceof Error ? err.message : "Unknown error loading data");
+            const errorMessage = err instanceof Error ? err.message : "Unknown error loading data";
+
+            // Only set error if it hasn't been set in a more specific catch block
+            if (!error) {
+                setError(errorMessage);
+            }
         } finally {
             if (conn) {
                 conn.close();
             }
         }
-    }, [db, loading, selectedDateRange]);
+    }, [db, loading, selectedDateRange, error]);
 
     useEffect(() => {
         if (db && !loading && !histogramData && selectedDateRange) {
