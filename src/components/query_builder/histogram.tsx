@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { useDuckDb } from "duckdb-wasm-kit";
 import * as vg from "@uwdata/vgplot";
+import { useNavigation } from '@/util/navigation';
+import {useDuckDB} from "@/context/DuckDBContext";
 
 interface HistogramProps {
     readyToPlot: boolean;
@@ -11,12 +12,13 @@ interface BrushValue {
 }
 
 const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
-    const { db, loading } = useDuckDb();
+    const { db, loading, setHistogramData } = useDuckDB();
     const plotRef = useRef<HTMLDivElement>(null);
     const [dataLoaded, setDataLoaded] = useState(false);
     const [brush, setBrush] = useState<BrushValue | null>(null);
     const [error, setError] = useState<string | null>(null);
     const connRef = useRef<any>(null);
+    const { navigate } = useNavigation();
 
     const formatDate = (date: Date): string => {
         return date.toLocaleString('en-US', {
@@ -204,7 +206,7 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
             <div className="text-center p-4">
                 <p className="text-white text-lg">Error: {error}</p>
                 <button
-                    onClick={() => window.location.href = "/"}
+                    onClick={() => navigate('/')}
                     className="mt-4 px-6 py-2 bg-[#CFB991] text-black rounded-md hover:bg-[#BFA881] transition-colors"
                 >
                     Return to Home
@@ -230,11 +232,14 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
                             console.log(`DEBUG: Selected time range: ${startTime} to ${endTime}`);
 
                             const query = `SELECT * FROM job_data_small WHERE time BETWEEN '${
-                                brush.value[0].toISOString()
+                                    brush.value[0].toISOString()
                             }' AND '${brush.value[1].toISOString()}'`;
 
+                            // Store query in localStorage for compatibility with existing code
                             window.localStorage.setItem("SQLQuery", query);
-                            window.location.href = "/data_analysis";
+
+                            // Use our navigation utility to navigate
+                            navigate('/data_analysis');
                         } else {
                             alert("No selection made");
                         }
