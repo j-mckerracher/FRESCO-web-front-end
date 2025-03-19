@@ -80,13 +80,14 @@ class TimeSeriesClient {
         }
     }
 
+    // Update the downloadFile method to better handle the data loading
     async downloadFile(url: string): Promise<boolean> {
         const conn = await this.ensureConnection();
         const tempTableName = `temp_table_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const bufferName = `parquet_buffer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
         try {
-            // console.log(`Downloading: ${url}`);
+            console.log(`DEBUG: Downloading data from signed URL...`);
             const response = await fetch(url, {
                 method: 'GET',
                 mode: 'cors',
@@ -99,9 +100,7 @@ class TimeSeriesClient {
 
             const arrayBuffer = await response.arrayBuffer();
             const data = new Uint8Array(arrayBuffer);
-
-            // Ensure table exists before proceeding
-            await this.ensureTable();
+            console.log(`DEBUG: Downloaded ${data.byteLength} bytes`);
 
             // Register the buffer
             await this.db.registerFileBuffer(bufferName, data);
@@ -109,34 +108,35 @@ class TimeSeriesClient {
             try {
                 // Create and populate temporary table
                 await conn.query(`
-                    CREATE TEMPORARY TABLE ${tempTableName} AS 
-                    SELECT * FROM parquet_scan('${bufferName}');
-                `);
+                CREATE TEMPORARY TABLE ${tempTableName} AS 
+                SELECT * FROM parquet_scan('${bufferName}');
+            `);
 
-                // Insert data from temp table to main table
-                await conn.query(`
-                    INSERT INTO s3_fresco 
+                // Check rows in temp table
+                const tempRows = await conn.query(`SELECT COUNT(*) as count FROM ${tempTableName};`);
+                const tempCount = tempRows.toArray()[0].count;
+                console.log(`DEBUG: Temporary table contains ${tempCount} rows`);
+
+                if (tempCount > 0) {
+                    // Insert data from temp table to job_data_small table
+                    await conn.query(`
+                    INSERT INTO job_data_small 
                     SELECT * FROM ${tempTableName};
                 `);
 
-                // const count = await conn.query(`
-                //     SELECT COUNT(*) as count FROM s3_fresco;
-                // `);
-                // console.log(`Current row count: ${count.toArray()[0].count}`);
-
-                return true;
+                    return true;
+                } else {
+                    console.warn(`DEBUG: Downloaded parquet file contains no rows`);
+                    return false;
+                }
             } finally {
-                // Clean up temporary table
+                // Clean up temporary table only
                 await conn.query(`DROP TABLE IF EXISTS ${tempTableName};`);
+                // Note: DuckDB-wasm doesn't have a method to unregister file buffers
+                // The buffer will be garbage collected when no longer referenced
             }
         } catch (error) {
-            console.error(`Error processing file ${url}:`, error);
-            // Clean up temp table in case of error
-            try {
-                await conn.query(`DROP TABLE IF EXISTS ${tempTableName};`);
-            } catch (cleanupError) {
-                console.error('Error during cleanup:', cleanupError);
-            }
+            console.error(`Error processing file:`, error);
             return false;
         }
     }
@@ -188,35 +188,43 @@ class TimeSeriesClient {
     }
 
     async queryData(query: string, rowLimit: number): Promise<QueryResult> {
+        // Log the exact query received by this method
+        console.log(`DEBUG: TimeSeriesClient.queryData sending query: ${query}`);
+
+        // Create a payload with the UNMODIFIED query
         const payload: QueryPayload = {
-            query,
+            query: query, // Keep the original query exactly as received
             clientId: "test-client",
             rowLimit
         };
 
-        const response = await fetch(`${this.baseUrl}/`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        });
+        try {
+            const response = await fetch(`${this.baseUrl}/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
 
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`DEBUG: API error response (${response.status}): ${errorText}`);
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+
+            const result = await response.json() as QueryResult;
+            console.log(`DEBUG: API response received with transferId: ${result.transferId || 'none'}`);
+
+            return result;
+        } catch (error) {
+            console.error('DEBUG: Error in queryData:', error);
+            throw error;
         }
-
-        const result = await response.json() as QueryResult;
-        const results = JSON.parse(result.body);
-
-        if (results.chunks) {
-            await this.downloadContent(results.chunks.map((chunk: { url: string }) => chunk.url));
-        }
-
-        return result;
     }
 }
 
+// For src/util/client.ts - Complete fixed startSingleQuery function
 async function startSingleQuery(
     sqlQuery: string,
     db: AsyncDuckDB,
@@ -224,19 +232,20 @@ async function startSingleQuery(
     rowLimit: number,
     onProgress?: (progress: number) => void
 ): Promise<void> {
+    console.log(`DEBUG: Starting query execution with: ${sqlQuery}`);
     const client = new TimeSeriesClient(20, db);
 
     try {
         const conn = await db.connect();
 
-        // Extract time bounds from the SQL query
+        // Extract time bounds from the SQL query for logging only
         const timeBounds = extractTimeBounds(sqlQuery);
-        console.log(`Extracted time bounds: ${timeBounds.start} to ${timeBounds.end}`);
+        console.log(`DEBUG: Extracted time bounds: ${timeBounds.start} to ${timeBounds.end}`);
 
         // Set up the destination table
         await conn.query(`DROP TABLE IF EXISTS ${tableName};`);
         await conn.query(`
-            CREATE TABLE ${tableName}(
+            CREATE TABLE IF NOT EXISTS ${tableName}(
                 time TIMESTAMP,
                 submit_time TIMESTAMP,
                 start_time TIMESTAMP,
@@ -262,19 +271,41 @@ async function startSingleQuery(
             );
         `);
 
-        // Query the API and load data
-        const result = await client.queryData(sqlQuery, rowLimit);
-        const results = JSON.parse(result.body);
+        // Send the ORIGINAL query to the API - this is the key fix
+        console.log(`DEBUG: Sending original query to API: ${sqlQuery}`);
 
-        if (results.chunks) {
+        // This calls the Lambda via API Gateway with the SQL query
+        const result = await client.queryData(sqlQuery, rowLimit);
+
+        // Parse result
+        let results;
+        try {
+            results = JSON.parse(result.body);
+            console.log(`DEBUG: API response parsed successfully, chunks: ${results.chunks?.length || 0}`);
+        } catch (parseError) {
+            console.error('Error parsing API response:', parseError);
+            console.log('Raw response body:', result.body);
+            throw new Error('Failed to parse API response');
+        }
+
+        if (results.chunks && results.chunks.length > 0) {
             const totalChunks = results.chunks.length;
+            console.log(`DEBUG: Processing ${totalChunks} chunks from API response`);
             let processedChunks = 0;
 
             // Process chunks in batches
             for (let i = 0; i < totalChunks; i += 20) {
                 const batchChunks = results.chunks.slice(i, Math.min(i + 20, totalChunks));
+                console.log(`DEBUG: Processing batch ${Math.floor(i / 20) + 1} with ${batchChunks.length} chunks`);
 
-                // Download batch of chunks
+                // Log the first URL in each batch for debugging
+                if (batchChunks.length > 0) {
+                    // Log just the path part of the URL to avoid exposing full signed URL in logs
+                    const sampleUrl = new URL(batchChunks[0].url);
+                    console.log(`DEBUG: Sample URL path from batch: ${sampleUrl.pathname}`);
+                }
+
+                // Download data from the signed URLs
                 await client.downloadContent(batchChunks.map((chunk: { url: string }) => chunk.url));
 
                 processedChunks += batchChunks.length;
@@ -285,26 +316,19 @@ async function startSingleQuery(
                     onProgress(progress);
                 }
             }
+        } else {
+            console.warn('DEBUG: No chunks returned from API');
+            throw new Error(`No data found for the selected time range`);
         }
 
-        // Check if s3_fresco table has data
-        const sourceCount = await conn.query(`SELECT COUNT(*) as count FROM s3_fresco;`);
-        console.log(`Source table contains ${sourceCount.toArray()[0].count} rows`);
-
-        // Get sample time values to debug
-        const timeSample = await conn.query(`SELECT time FROM s3_fresco ORDER BY time LIMIT 5;`);
-        console.log(`Sample time values:`, timeSample.toArray().map(row => row.time));
-
-        // Transfer filtered data to destination table using the extracted time bounds
-        await conn.query(`
-            INSERT INTO ${tableName} 
-            SELECT * FROM s3_fresco 
-            WHERE time BETWEEN '${timeBounds.start}' AND '${timeBounds.end}';
-        `);
-
-        // Verify the data transfer
+        // Verify the data was loaded into the destination table
         const count = await conn.query(`SELECT COUNT(*) as count FROM ${tableName};`);
-        console.log(`Loaded ${count.toArray()[0].count} rows into ${tableName}`);
+        const finalCount = count.toArray()[0].count;
+        console.log(`DEBUG: Loaded ${finalCount} rows into ${tableName}`);
+
+        if (finalCount === 0) {
+            throw new Error(`No data loaded into ${tableName} table after downloading chunks`);
+        }
 
         await conn.close();
     } catch (error) {
@@ -313,20 +337,22 @@ async function startSingleQuery(
     }
 }
 
-// Helper function to extract time bounds from query
+
 function extractTimeBounds(query: string) {
     const timePattern = /time\s+BETWEEN\s+'([^']+)'\s+AND\s+'([^']+)'/i;
     const match = query.match(timePattern);
 
     if (match && match.length >= 3) {
+        const start = match[1].trim();
+        const end = match[2].trim();
+        console.log(`DEBUG: Successfully extracted time range: ${start} to ${end}`);
         return {
-            start: match[1],
-            end: match[2]
+            start,
+            end
         };
     }
 
-    // Default to a reasonable fallback if pattern doesn't match
-    console.error('Failed to extract time bounds from query:', query);
+    console.error('DEBUG: Failed to extract time bounds from query:', query);
     const now = new Date();
     const oneMonthAgo = new Date(now);
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);

@@ -1,16 +1,14 @@
-// src/pages/data_analysis.tsx
-"use client";
-import * as vg from "@uwdata/vgplot";
-import Header from "@/components/Header";
-import VgPlot from "@/components/vgplot";
-import { useDuckDb } from "duckdb-wasm-kit";
 import { useCallback, useEffect, useRef, useState } from "react";
+import * as vg from "@uwdata/vgplot";
+import VgPlot from "@/components/vgplot";
 import { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import { PlotType } from "@/components/component_types";
 import MultiSelect from "@/components/multi-select";
 import Vgmenu from "@/components/vgmenu";
 import dynamic from 'next/dynamic';
 import { exportDataAsCSV } from "@/util/export";
+import { useDuckDB } from "@/context/DuckDBContext";
+import { useNavigation } from "@/util/navigation";
 
 // Import LoadingAnimation with no SSR
 const LoadingAnimation = dynamic(() => import('@/components/LoadingAnimation'), {
@@ -63,11 +61,22 @@ const column_to_formatted = new Map([
   ["value_block", "Block Usage"],
 ]);
 
-const DataAnalysis = () => {
+const DataAnalysisPage = () => {
   console.log('DataAnalysis component rendered');
 
-  const { db, loading, error } = useDuckDb();
-  const [dataloading, setDataLoading] = useState(true);
+  // Use the context instead of the hook directly
+  const {
+    db,
+    loading,
+    error,
+    dataloading,
+    setDataLoading,
+    histogramData,
+    setHistogramData,
+    crossFilter,
+    setCrossFilter
+  } = useDuckDB();
+
   const [loadError, setLoadError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [histogramColumns, setHistogramColumns] = useState<
@@ -77,9 +86,8 @@ const DataAnalysis = () => {
       { value: string; label: string }[]
   >([]);
   const conn = useRef<AsyncDuckDBConnection | undefined>(undefined);
-  const crossFilter = useRef<any>(null);
+  const { navigate } = useNavigation();
 
-  // Handle CSV download
   const handleDownload = async () => {
     if (!conn.current) {
       alert("Database connection not available");
@@ -89,13 +97,49 @@ const DataAnalysis = () => {
     try {
       setDownloading(true);
 
-      // Generate filename with date
-      const now = new Date();
-      const dateString = now.toISOString().split('T')[0];
-      const fileName = `fresco-data-${dateString}`;
+      // Get the SQL query from localStorage
+      const sqlQuery = localStorage.getItem("SQLQuery");
+      let fileName = "fresco-data";
+      let filters = "";
 
-      // Note: We're not applying any filters - this downloads all data
-      await exportDataAsCSV(conn.current, "job_data", fileName);
+      // If we have a stored query, extract the date range for the filename and filter
+      if (sqlQuery) {
+        console.log("Using stored query for CSV export:", sqlQuery);
+
+        // Extract date range from the SQL query using regex
+        const dateRangeMatch = sqlQuery.match(/time BETWEEN '([^']+)' AND '([^']+)'/i);
+
+        if (dateRangeMatch && dateRangeMatch.length >= 3) {
+          const startDate = new Date(dateRangeMatch[1]);
+          const endDate = new Date(dateRangeMatch[2]);
+
+          // Format dates for filename: YYYY-MM-DD
+          const startStr = startDate.toISOString().split('T')[0];
+          const endStr = endDate.toISOString().split('T')[0];
+
+          // Use date range in filename
+          fileName = `fresco-data-${startStr}_to_${endStr}`;
+
+          // Create filter for the CSV export
+          filters = `time BETWEEN '${dateRangeMatch[1]}' AND '${dateRangeMatch[2]}'`;
+
+          console.log(`Using date range filter: ${filters}`);
+          console.log(`Using filename: ${fileName}.csv`);
+        } else {
+          console.warn("Could not extract date range from query, using default filename");
+        }
+      } else {
+        console.warn("No stored query found, exporting all data with current date");
+        // Fallback to current date if no query is stored
+        const now = new Date();
+        const dateString = now.toISOString().split('T')[0];
+        fileName = `fresco-data-${dateString}`;
+      }
+
+      // Pass the filters to the export function
+      await exportDataAsCSV(conn.current, "job_data", fileName, filters);
+
+      console.log("CSV export completed successfully");
     } catch (error) {
       console.error("Download error:", error);
       alert("Failed to download data: " + (error instanceof Error ? error.message : "Unknown error"));
@@ -187,7 +231,8 @@ const DataAnalysis = () => {
       db: !!db,
       dataloading,
       conn: !!conn.current,
-      useDemoData
+      useDemoData,
+      histogramData
     });
 
     if (!loading && db && dataloading) {
@@ -213,97 +258,63 @@ const DataAnalysis = () => {
         let dataLoaded = false;
 
         if (!shouldCreateDemoData) {
-          console.log("Checking for S3 data from query builder...");
+          console.log("Checking for job_data_small table...");
 
           // First, check if job_data_small exists by actually running a query
           // This is more reliable than checking for existence
           try {
-            // Drop existing job_data if it exists
-            await conn.current.query("DROP TABLE IF EXISTS job_data");
-
-            // First try to see if the table exists by running a simple count query
-            const result = await conn.current.query(`
-              SELECT COUNT(*) as count FROM job_data_small
+            // First check if job_data already exists
+            const existingCheck = await conn.current.query(`
+              SELECT name FROM sqlite_master 
+              WHERE type='table' AND name='job_data'
             `);
 
-            const count = result.toArray()[0].count;
-            console.log(`Found job_data_small table with ${count} rows`);
-
-            if (count > 0) {
-              // Copy the data directly into job_data
-              console.log("Creating job_data from job_data_small...");
-              await conn.current.query(`
-                CREATE TABLE job_data AS
-                SELECT * FROM job_data_small
+            if (existingCheck.toArray().length === 0) {
+              // Now check for job_data_small
+              const result = await conn.current.query(`
+                SELECT COUNT(*) as count FROM job_data_small
               `);
 
-              // Verify copy was successful
-              const verifyResult = await conn.current.query(`
-                SELECT COUNT(*) as count FROM job_data
-              `);
+              const count = result.toArray()[0].count;
+              console.log(`Found job_data_small table with ${count} rows`);
 
-              const newCount = verifyResult.toArray()[0].count;
-              console.log(`Successfully created job_data with ${newCount} rows`);
+              if (count > 0) {
+                // Copy the data directly into job_data
+                console.log("Creating job_data from job_data_small...");
+                await conn.current.query(`
+                  CREATE TABLE job_data AS
+                  SELECT * FROM job_data_small
+                `);
 
-              if (newCount > 0) {
-                dataLoaded = true;
-              } else {
-                throw new Error("job_data was created but has 0 rows");
-              }
-            } else {
-              console.log("job_data_small exists but is empty");
-            }
-          } catch (err) {
-            // If error contains message about table not existing
-            const errorMessage = err instanceof Error ? err.message : String(err);
-            if (errorMessage.includes("does not exist")) {
-              console.log("job_data_small table doesn't exist, checking for query...");
+                // Verify copy was successful
+                const verifyResult = await conn.current.query(`
+                  SELECT COUNT(*) as count FROM job_data
+                `);
 
-              // Try to run a stored query if available
-              const sqlQuery = window.localStorage.getItem("SQLQuery");
-              if (sqlQuery) {
-                try {
-                  console.log("Found SQL query, attempting to execute:", sqlQuery);
+                const newCount = verifyResult.toArray()[0].count;
+                console.log(`Successfully created job_data with ${newCount} rows`);
 
-                  // Create job_data table first
-                  await conn.current.query(`
-                    CREATE TABLE IF NOT EXISTS job_data (
-                      time TIMESTAMP,
-                      nhosts BIGINT,
-                      ncores BIGINT,
-                      account VARCHAR,
-                      queue VARCHAR,
-                      host VARCHAR,
-                      value_cpuuser DOUBLE,
-                      value_memused DOUBLE
-                    )
-                  `);
-
-                  // Try to execute the query directly and insert results into job_data
-                  // Note: This is likely to fail since s3_fresco might not be accessible this way
-                  // But we'll try it anyway
-                  await conn.current.query(`
-                    INSERT INTO job_data
-                    ${sqlQuery}
-                  `);
-
-                  // Check if any data was loaded
-                  const countCheck = await conn.current.query("SELECT COUNT(*) as count FROM job_data");
-                  const rowCount = countCheck.toArray()[0].count;
-                  console.log(`Query executed with ${rowCount} rows`);
-
-                  if (rowCount > 0) {
-                    dataLoaded = true;
-                  }
-                } catch (queryErr) {
-                  console.error("Error executing stored query:", queryErr);
+                if (newCount > 0) {
+                  dataLoaded = true;
+                } else {
+                  throw new Error("job_data was created but has 0 rows");
                 }
               } else {
-                console.log("No SQL query found in localStorage");
+                console.log("job_data_small exists but is empty");
               }
             } else {
-              console.error("Error checking job_data_small:", err);
+              // job_data already exists, check if it has data
+              const countCheck = await conn.current.query("SELECT COUNT(*) as count FROM job_data");
+              const rowCount = countCheck.toArray()[0].count;
+
+              if (rowCount > 0) {
+                console.log(`job_data already exists with ${rowCount} rows`);
+                dataLoaded = true;
+              }
             }
+          } catch (err) {
+            console.log("Table check error:", err);
+            // If job_data_small doesn't exist, we'll handle that later
           }
         }
 
@@ -324,7 +335,8 @@ const DataAnalysis = () => {
         console.log(`Final row count: ${rowCount} rows in job_data table`);
 
         // Initialize crossfilter before setting up the coordinator
-        crossFilter.current = vg.Selection.crossfilter();
+        const newCrossFilter = vg.Selection.crossfilter();
+        setCrossFilter(newCrossFilter);
 
         // Set up the coordinator
         console.log("Setting up vgplot coordinator");
@@ -347,7 +359,7 @@ const DataAnalysis = () => {
       console.error('DuckDB Error:', error);
       setLoadError('Database error: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
-  }, [dataloading, db, error, loading]);
+  }, [dataloading, db, error, loading, histogramData, setCrossFilter, setDataLoading]);
 
   useEffect(() => {
     loadData(false);
@@ -373,7 +385,6 @@ const DataAnalysis = () => {
 
   return (
       <div className="bg-black min-h-screen flex flex-col">
-        <Header />
         {shouldShowLoading ? (
             <>
               {console.log('Rendering loading state')}
@@ -391,7 +402,7 @@ const DataAnalysis = () => {
                     Try Again with Demo Data
                   </button>
                   <button
-                      onClick={() => window.location.href = "/query_builder"}
+                      onClick={() => navigate('/query_builder')}
                       className="px-4 py-2 bg-gray-700 text-white rounded-md">
                     Return to Query Builder
                   </button>
@@ -439,7 +450,7 @@ const DataAnalysis = () => {
                   <Vgmenu
                       db={db}
                       conn={conn.current}
-                      crossFilter={crossFilter.current}
+                      crossFilter={crossFilter}
                       dbLoading={loading}
                       dataLoading={dataloading}
                       tableName={"job_data"}
@@ -454,7 +465,7 @@ const DataAnalysis = () => {
                           key={col.value}
                           db={db}
                           conn={conn.current}
-                          crossFilter={crossFilter.current}
+                          crossFilter={crossFilter}
                           dbLoading={loading}
                           dataLoading={dataloading}
                           tableName={"job_data"}
@@ -473,7 +484,7 @@ const DataAnalysis = () => {
                           key={col.value}
                           db={db}
                           conn={conn.current}
-                          crossFilter={crossFilter.current}
+                          crossFilter={crossFilter}
                           dbLoading={loading}
                           dataLoading={dataloading}
                           tableName={"job_data"}
@@ -492,5 +503,5 @@ const DataAnalysis = () => {
   );
 };
 
-export default DataAnalysis;
+export default DataAnalysisPage;
 export { column_to_formatted as column_pretty_names };
