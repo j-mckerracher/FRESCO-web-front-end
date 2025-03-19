@@ -64,6 +64,164 @@ const QueryBuilder = () => {
         setProgress(Math.round(currentProgress));
     };
 
+    // Function to create demo data directly in job_data_small
+    const createDemoData = async () => {
+        if (!db) {
+            setError("DuckDB not initialized");
+            return false;
+        }
+
+        let conn = null;
+        try {
+            updateProgress('INITIALIZING');
+            conn = await db.connect();
+
+            updateProgress('SETUP');
+            await conn.query("LOAD icu");
+            await conn.query("SET TimeZone='America/New_York'");
+
+            updateProgress('CLEANUP');
+            try {
+                await conn.query("DROP VIEW IF EXISTS histogram_view");
+                await conn.query("DROP TABLE IF EXISTS job_data_small");
+                await conn.query("DROP TABLE IF EXISTS histogram");
+            } catch (e) {
+                console.log('No existing tables/views to drop');
+            }
+
+            updateProgress('DATA_LOAD', 20);
+
+            // Create job_data_small table
+            await conn.query(`
+                CREATE TABLE job_data_small (
+                    time TIMESTAMP,
+                    submit_time TIMESTAMP,
+                    start_time TIMESTAMP,
+                    end_time TIMESTAMP,
+                    timelimit DOUBLE,
+                    nhosts BIGINT,
+                    ncores BIGINT,
+                    account VARCHAR,
+                    queue VARCHAR,
+                    host VARCHAR,
+                    jid VARCHAR,
+                    unit VARCHAR,
+                    jobname VARCHAR,
+                    exitcode VARCHAR,
+                    host_list VARCHAR,
+                    username VARCHAR,
+                    value_cpuuser DOUBLE,
+                    value_gpu DOUBLE,
+                    value_memused DOUBLE,
+                    value_memused_minus_diskcache DOUBLE,
+                    value_nfs DOUBLE,
+                    value_block DOUBLE
+                );
+            `);
+
+            // Generate demo data
+            const startDate = selectedDateRange ? selectedDateRange.start : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+            const endDate = selectedDateRange ? selectedDateRange.end : new Date();
+            const timeRange = endDate.getTime() - startDate.getTime();
+            const pointCount = 500;
+
+            updateProgress('DATA_LOAD', 40);
+
+            // Create values for a single batch insert
+            const values = [];
+            for (let i = 0; i < pointCount; i++) {
+                const pointTime = new Date(startDate.getTime() + (timeRange * (i / pointCount)));
+                const cpuValue = 50 + 40 * Math.sin(i / (pointCount / 10));
+                const memValue = 30 + 20 * Math.cos(i / (pointCount / 15));
+
+                // Create row with random values that match the schema
+                values.push(`(
+                    '${pointTime.toISOString()}', 
+                    '${new Date(pointTime.getTime() - Math.random() * 3600000).toISOString()}',
+                    '${new Date(pointTime.getTime() - Math.random() * 1800000).toISOString()}',
+                    '${new Date(pointTime.getTime() + Math.random() * 3600000).toISOString()}',
+                    ${Math.random() * 10 + 1},
+                    ${1 + Math.floor(Math.random() * 4)}, 
+                    ${4 + Math.floor(Math.random() * 28)}, 
+                    'research_${["cs", "physics", "bio"][Math.floor(Math.random() * 3)]}', 
+                    '${["normal", "high", "low"][Math.floor(Math.random() * 3)]}', 
+                    'node${100 + Math.floor(Math.random() * 100)}', 
+                    'job_${10000 + Math.floor(Math.random() * 90000)}',
+                    'hrs',
+                    'job_name_${Math.floor(Math.random() * 100)}',
+                    '${Math.random() > 0.9 ? '1' : '0'}',
+                    'host1,host2,host3',
+                    'user${Math.floor(Math.random() * 10)}',
+                    ${cpuValue}, 
+                    ${Math.random() > 0.9 ? 'NULL' : Math.random() * 10}, 
+                    ${memValue},
+                    ${memValue * 0.8},
+                    ${Math.random() * 5},
+                    ${Math.random() * 8}
+                )`);
+            }
+
+            updateProgress('DATA_LOAD', 60);
+
+            // Insert in smaller batches to avoid query size limits
+            const batchSize = 50;
+            for (let i = 0; i < values.length; i += batchSize) {
+                const batch = values.slice(i, i + batchSize);
+                const batchQuery = `
+                    INSERT INTO job_data_small VALUES ${batch.join(",")};
+                `;
+                await conn.query(batchQuery);
+                updateProgress('DATA_LOAD', 60 + Math.round((i / values.length) * 30));
+            }
+
+            console.log(`Created demo data with ${pointCount} points`);
+
+            // Verify data was loaded
+            const countCheck = await conn.query("SELECT COUNT(*) as count FROM job_data_small");
+            const rowCount = countCheck.toArray()[0].count;
+            console.log(`Loaded ${rowCount} rows into job_data_small table`);
+
+            if (rowCount === 0) {
+                throw new Error("Failed to create demo data");
+            }
+
+            updateProgress('HISTOGRAM');
+
+            // Create histogram table
+            await conn.query(`
+                CREATE TABLE histogram AS 
+                SELECT 
+                    CAST(time AS TIMESTAMP) as time
+                FROM job_data_small 
+                WHERE time IS NOT NULL
+                ORDER BY time
+            `);
+
+            // Verify the histogram table
+            const histogramCount = await conn.query(`SELECT COUNT(*) as count FROM histogram`);
+            console.log(`Created histogram table with ${histogramCount.toArray()[0].count} rows`);
+
+            updateProgress('VIEW');
+
+            // Create view for the histogram
+            await conn.query(`
+                CREATE VIEW histogram_view AS 
+                SELECT * FROM histogram
+            `);
+
+            return true;
+        } catch (err) {
+            console.error("Error creating demo data:", err);
+            const errorMessage = err instanceof Error ? err.message : "Unknown error creating demo data";
+            setError(errorMessage);
+            return false;
+        } finally {
+            if (conn) {
+                conn.close();
+            }
+        }
+    };
+
     const getParquetFromAPI = useCallback(async () => {
         if (!db || !selectedDateRange) {
             setError("DuckDB not initialized or no date range selected");
@@ -117,28 +275,8 @@ const QueryBuilder = () => {
 
                     // If no records, show a user-friendly error
                     if (initialDataCount === 0) {
-                        // Check specifically for Jan 5, 2023 data
-                        const jan5Check = await conn.query(`
-                        SELECT COUNT(*) as count FROM s3_fresco
-                        WHERE time >= '2023-01-05' AND time < '2023-01-06'
-                    `);
-                        const jan5Count = jan5Check.toArray()[0].count;
-
-                        let errorMessage = "";
-
-                        // Format dates for display
-                        const formattedStart = selectedDateRange.start.toLocaleString();
-                        const formattedEnd = selectedDateRange.end.toLocaleString();
-
-                        if (jan5Count > 0) {
-                            // We have data for Jan 5 but not for the selected range
-                            errorMessage = `No data found for the selected time range (${formattedStart} to ${formattedEnd}). However, data is available for January 5, 2023.`;
-                        } else {
-                            // We might not have any data at all
-                            errorMessage = `No data found for the selected time range (${formattedStart} to ${formattedEnd}). Try selecting January 5, 2023 as a start date, as we know data exists for that date.`;
-                        }
-
-                        throw new Error(errorMessage);
+                        // If no data was found for the selected range, throw an error to trigger demo data
+                        throw new Error(`No data found for the selected time range. Try January 5, 2023 as a start date, or use demo data.`);
                     }
 
                     // Continue with histogram creation if we have data
@@ -152,13 +290,13 @@ const QueryBuilder = () => {
 
                     // Create histogram with explicit timestamp conversion
                     await conn.query(`
-                CREATE TABLE histogram AS 
-                SELECT 
-                    CAST(time AS TIMESTAMP) as time
-                FROM job_data_small 
-                WHERE time IS NOT NULL
-                ORDER BY time
-            `);
+                        CREATE TABLE histogram AS 
+                        SELECT 
+                            CAST(time AS TIMESTAMP) as time
+                        FROM job_data_small 
+                        WHERE time IS NOT NULL
+                        ORDER BY time
+                    `);
 
                     // Verify the table was created with data
                     const histogramCount = await conn.query(`SELECT COUNT(*) as count FROM histogram`);
@@ -170,9 +308,9 @@ const QueryBuilder = () => {
 
                     updateProgress('VIEW');
                     await conn.query(`
-                CREATE VIEW histogram_view AS 
-                SELECT * FROM histogram
-            `);
+                        CREATE VIEW histogram_view AS 
+                        SELECT * FROM histogram
+                    `);
 
                     // Debug the histogram view
                     const histogramCheck = await conn.query(`SELECT COUNT(*) as count FROM histogram`);
@@ -190,15 +328,15 @@ const QueryBuilder = () => {
                     // Check time range in histogram
                     if (histCount > 0) {
                         const rangeCheck = await conn.query(`
-                    SELECT MIN(time) as min_time, MAX(time) as max_time FROM histogram
-                `);
+                            SELECT MIN(time) as min_time, MAX(time) as max_time FROM histogram
+                        `);
                         const range = rangeCheck.toArray()[0];
                         console.log(`DEBUG: Histogram time range: ${range.min_time} to ${range.max_time}`);
                     }
 
                     const viewStats = await conn.query(`
-                SELECT COUNT(*) as count FROM histogram_view
-            `);
+                        SELECT COUNT(*) as count FROM histogram_view
+                    `);
                     const viewRowCount = viewStats.toArray()[0].count;
 
                     if (viewRowCount === 0) {
@@ -210,17 +348,13 @@ const QueryBuilder = () => {
                 } catch (error) {
                     console.error("Error fetching or processing data:", error);
 
-                    // If it's an API error about no data found, show that error to the user
+                    // If it's an API error about s3_fresco not existing or no data found,
+                    // we'll fall back to creating demo data
                     const errorMessage = error instanceof Error ? error.message : "Unknown error loading data";
+                    setError(`Error loading real data: ${errorMessage}. Try using demo data instead.`);
 
-                    if (errorMessage.includes("No data found")) {
-                        setError(errorMessage);
-                    } else {
-                        setError(`Error loading data: ${errorMessage}. Try selecting January 5, 2023 as a start date, as we know data exists for that date.`);
-                    }
-
-                    // Don't generate sample data, just propagate the error
-                    throw error;
+                    // Don't generate demo data automatically - let the user decide with the retry button
+                    return;
                 }
             }
         } catch (err) {
@@ -255,6 +389,19 @@ const QueryBuilder = () => {
     const handleBackToDateSelection = () => {
         setCurrentStep(WorkflowStep.DATE_SELECTION);
         setHistogramData(false);
+        setError(null);
+    };
+
+    // Handler for creating demo data
+    const handleCreateDemoData = async () => {
+        setError(null);
+        setProgress(0);
+
+        // Create demo data
+        const success = await createDemoData();
+        if (success) {
+            setHistogramData(true);
+        }
     };
 
     return (
@@ -268,7 +415,7 @@ const QueryBuilder = () => {
                     />
                 ) : (
                     <>
-                        {loading || !histogramData || !db ? (
+                        {loading || (!histogramData && !error) || !db ? (
                             <LoadingAnimation
                                 currentStage={loadingStage}
                                 progress={progress}
@@ -276,12 +423,20 @@ const QueryBuilder = () => {
                         ) : error ? (
                             <div className="text-center p-6 bg-zinc-900 rounded-lg">
                                 <p className="text-red-500 text-xl mb-4">{error}</p>
-                                <button
-                                    onClick={handleBackToDateSelection}
-                                    className="px-6 py-2 bg-[#CFB991] text-black rounded-md hover:bg-[#BFA881] transition-colors"
-                                >
-                                    Go Back
-                                </button>
+                                <div className="flex gap-4 justify-center">
+                                    <button
+                                        onClick={handleCreateDemoData}
+                                        className="px-6 py-2 bg-[#CFB991] text-black rounded-md hover:bg-[#BFA881] transition-colors"
+                                    >
+                                        Try with Demo Data
+                                    </button>
+                                    <button
+                                        onClick={handleBackToDateSelection}
+                                        className="px-6 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-600 transition-colors"
+                                    >
+                                        Go Back
+                                    </button>
+                                </div>
                             </div>
                         ) : (
                             <div className="w-full">

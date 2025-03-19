@@ -1,8 +1,6 @@
-// src/views/DataAnalysisPage.tsx
-"use client";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as vg from "@uwdata/vgplot";
 import VgPlot from "@/components/vgplot";
-import { useCallback, useEffect, useRef, useState } from "react";
 import { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import { PlotType } from "@/components/component_types";
 import MultiSelect from "@/components/multi-select";
@@ -10,7 +8,7 @@ import Vgmenu from "@/components/vgmenu";
 import dynamic from 'next/dynamic';
 import { exportDataAsCSV } from "@/util/export";
 import { useDuckDB } from "@/context/DuckDBContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigation } from "@/util/navigation";
 
 // Import LoadingAnimation with no SSR
 const LoadingAnimation = dynamic(() => import('@/components/LoadingAnimation'), {
@@ -88,7 +86,7 @@ const DataAnalysisPage = () => {
       { value: string; label: string }[]
   >([]);
   const conn = useRef<AsyncDuckDBConnection | undefined>(undefined);
-  const navigate = useNavigate();
+  const { navigate } = useNavigation();
 
   // Handle CSV download
   const handleDownload = async () => {
