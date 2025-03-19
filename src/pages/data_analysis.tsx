@@ -88,7 +88,6 @@ const DataAnalysisPage = () => {
   const conn = useRef<AsyncDuckDBConnection | undefined>(undefined);
   const { navigate } = useNavigation();
 
-  // Handle CSV download
   const handleDownload = async () => {
     if (!conn.current) {
       alert("Database connection not available");
@@ -98,13 +97,49 @@ const DataAnalysisPage = () => {
     try {
       setDownloading(true);
 
-      // Generate filename with date
-      const now = new Date();
-      const dateString = now.toISOString().split('T')[0];
-      const fileName = `fresco-data-${dateString}`;
+      // Get the SQL query from localStorage
+      const sqlQuery = localStorage.getItem("SQLQuery");
+      let fileName = "fresco-data";
+      let filters = "";
 
-      // Note: We're not applying any filters - this downloads all data
-      await exportDataAsCSV(conn.current, "job_data", fileName);
+      // If we have a stored query, extract the date range for the filename and filter
+      if (sqlQuery) {
+        console.log("Using stored query for CSV export:", sqlQuery);
+
+        // Extract date range from the SQL query using regex
+        const dateRangeMatch = sqlQuery.match(/time BETWEEN '([^']+)' AND '([^']+)'/i);
+
+        if (dateRangeMatch && dateRangeMatch.length >= 3) {
+          const startDate = new Date(dateRangeMatch[1]);
+          const endDate = new Date(dateRangeMatch[2]);
+
+          // Format dates for filename: YYYY-MM-DD
+          const startStr = startDate.toISOString().split('T')[0];
+          const endStr = endDate.toISOString().split('T')[0];
+
+          // Use date range in filename
+          fileName = `fresco-data-${startStr}_to_${endStr}`;
+
+          // Create filter for the CSV export
+          filters = `time BETWEEN '${dateRangeMatch[1]}' AND '${dateRangeMatch[2]}'`;
+
+          console.log(`Using date range filter: ${filters}`);
+          console.log(`Using filename: ${fileName}.csv`);
+        } else {
+          console.warn("Could not extract date range from query, using default filename");
+        }
+      } else {
+        console.warn("No stored query found, exporting all data with current date");
+        // Fallback to current date if no query is stored
+        const now = new Date();
+        const dateString = now.toISOString().split('T')[0];
+        fileName = `fresco-data-${dateString}`;
+      }
+
+      // Pass the filters to the export function
+      await exportDataAsCSV(conn.current, "job_data", fileName, filters);
+
+      console.log("CSV export completed successfully");
     } catch (error) {
       console.error("Download error:", error);
       alert("Failed to download data: " + (error instanceof Error ? error.message : "Unknown error"));
