@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as vg from "@uwdata/vgplot";
-import { useNavigation } from '@/util/navigation';
-import {useDuckDB} from "@/context/DuckDBContext";
+import { useRouter } from 'next/router'; // Direct use of Next.js router
+import { useDuckDB } from "@/context/DuckDBContext";
 
 interface HistogramProps {
     readyToPlot: boolean;
@@ -18,7 +18,7 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
     const [brush, setBrush] = useState<BrushValue | null>(null);
     const [error, setError] = useState<string | null>(null);
     const connRef = useRef<any>(null);
-    const { navigate } = useNavigation();
+    const router = useRouter(); // Use Next.js router directly
 
     const formatDate = (date: Date): string => {
         return date.toLocaleString('en-US', {
@@ -201,12 +201,35 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
         };
     }, [db, loading, readyToPlot]);
 
+    const handleQueryDataset = () => {
+        if (brush?.value) {
+            // Format the brush values for proper display
+            const startTime = formatDate(brush.value[0]);
+            const endTime = formatDate(brush.value[1]);
+
+            console.log(`DEBUG: Selected time range: ${startTime} to ${endTime}`);
+
+            const query = `SELECT * FROM job_data_small WHERE time BETWEEN '${
+                brush.value[0].toISOString()
+            }' AND '${brush.value[1].toISOString()}'`;
+
+            // Store query in localStorage for compatibility with existing code
+            window.localStorage.setItem("SQLQuery", query);
+
+            // Use Next.js router directly to navigate
+            console.log('DEBUG: Navigating to data_analysis page with Next.js router');
+            router.push('/data_analysis');
+        } else {
+            alert("No selection made");
+        }
+    };
+
     if (error) {
         return (
             <div className="text-center p-4">
                 <p className="text-white text-lg">Error: {error}</p>
                 <button
-                    onClick={() => navigate('/')}
+                    onClick={() => router.push('/')}
                     className="mt-4 px-6 py-2 bg-[#CFB991] text-black rounded-md hover:bg-[#BFA881] transition-colors"
                 >
                     Return to Home
@@ -223,27 +246,7 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
             <div className="min-h-[60vh] w-full" ref={plotRef} />
             {dataLoaded && (
                 <button
-                    onClick={() => {
-                        if (brush?.value) {
-                            // Format the brush values for proper display
-                            const startTime = formatDate(brush.value[0]);
-                            const endTime = formatDate(brush.value[1]);
-
-                            console.log(`DEBUG: Selected time range: ${startTime} to ${endTime}`);
-
-                            const query = `SELECT * FROM job_data_small WHERE time BETWEEN '${
-                                    brush.value[0].toISOString()
-                            }' AND '${brush.value[1].toISOString()}'`;
-
-                            // Store query in localStorage for compatibility with existing code
-                            window.localStorage.setItem("SQLQuery", query);
-
-                            // Use our navigation utility to navigate
-                            navigate('/data_analysis');
-                        } else {
-                            alert("No selection made");
-                        }
-                    }}
+                    onClick={handleQueryDataset}
                     className="mt-8 px-6 py-2 bg-[#CFB991] text-black rounded-md hover:bg-[#BFA881] transition-colors"
                 >
                     Query dataset
