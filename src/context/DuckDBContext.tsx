@@ -96,9 +96,18 @@ export const DuckDBProvider: React.FC<DuckDBProviderProps> = ({ children }) => {
         try {
             // Create a new connection if needed
             if (!connectionInstance) {
+                console.log('DEBUG: Creating new DuckDB connection');
                 connectionInstance = await duckDBInstance.connect();
+
+                // Apply all necessary settings
                 await connectionInstance.query("LOAD icu");
                 await connectionInstance.query("SET TimeZone='America/New_York'");
+
+                // Additional settings for stability
+                await connectionInstance.query("PRAGMA threads=4");
+                await connectionInstance.query("PRAGMA memory_limit='2GB'");
+
+                console.log('DEBUG: DuckDB connection initialized with settings');
             }
 
             return connectionInstance;
