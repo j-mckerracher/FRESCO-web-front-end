@@ -105,11 +105,12 @@ const DataAnalysisPage = () => {
     };
 
     // Function to add missing columns as a view with default values
+    // In data_analysis.tsx, modify the addMissingColumns function
     const addMissingColumns = async () => {
         if (!conn.current) return;
 
         try {
-            console.log("Adding missing columns as view...");
+            console.log("Adding missing columns as table...");
 
             // Check which columns we need to add
             const expectedColumns = [
@@ -125,39 +126,37 @@ const DataAnalysisPage = () => {
                 return;
             }
 
-            console.log("Creating view with missing columns:", missingColumns);
-
             // Create SQL for missing columns with zeros
             const missingColumnsSql = missingColumns.map(col => `0 as ${col}`).join(', ');
 
-            // Create view with all existing columns plus missing ones
+            // Create TABLE instead of VIEW
             await conn.current.query(`
-        DROP VIEW IF EXISTS job_data_with_missing;
-        CREATE VIEW job_data_with_missing AS
-        SELECT
-          *,
-          ${missingColumnsSql}
-        FROM job_data;
-      `);
+            DROP TABLE IF EXISTS job_data_with_missing;
+            CREATE TABLE job_data_with_missing AS
+            SELECT
+                *,
+                ${missingColumnsSql}
+            FROM job_data;
+        `);
 
-            console.log("Created view with missing columns");
+            console.log("Created table with missing columns");
 
-            // Check the view to make sure all columns are present
-            const viewCheck = await conn.current.query(`
-        SELECT * FROM job_data_with_missing LIMIT 1
-      `);
+            // Check the table exists
+            const tableCheck = await conn.current.query(`
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='job_data_with_missing'
+        `);
 
-            const viewColumns = viewCheck.schema.fields.map(f => f.name);
-            console.log("Columns in enhanced view:", viewColumns);
+            if (tableCheck.toArray().length === 0) {
+                throw new Error("Failed to create table job_data_with_missing");
+            }
 
-            // Update availableColumns
-            setAvailableColumns(viewColumns);
-
-            // Update dataTableName to use the view
+            // Update state
             setDataTableName("job_data_with_missing");
-
         } catch (err) {
             console.error("Error adding missing columns:", err);
+            // Fallback to original table
+            setDataTableName("job_data");
         }
     };
 
