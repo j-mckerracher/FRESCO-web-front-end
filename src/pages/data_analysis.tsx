@@ -10,6 +10,7 @@ import { exportDataAsCSV } from "@/util/export";
 import { useDuckDB } from "@/context/DuckDBContext";
 import { useNavigation } from "@/util/navigation";
 import { column_pretty_names } from "@/components/vgplot";
+import Header from "@/components/Header";
 
 // Import LoadingAnimation with no SSR
 const LoadingAnimation = dynamic(() => import('@/components/LoadingAnimation'), {
@@ -735,6 +736,7 @@ const DataAnalysisPage = () => {
             ) : (
                 <>
                     {console.log('Rendering main content')}
+                    <Header />
                     {/* Add download button at the top */}
                     <div className="flex justify-end p-4">
                         <button
@@ -748,7 +750,14 @@ const DataAnalysisPage = () => {
                         >
                             {downloading ? 'Downloading...' : 'Download Data as CSV'}
                         </button>
+                        <a href="/query_builder">
+                            <div className="px-4 py-2 bg-zinc-800 text-white rounded-md hover:bg-zinc-700 transition-colors">
+                                Back to Query Builder
+                            </div>
+                        </a>
+
                     </div>
+
 
                     <div className="flex flex-row-reverse min-w-scren">
                         <div className="w-1/4 px-4 flex flex-col gap-4">
