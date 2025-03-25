@@ -69,6 +69,7 @@ const DataAnalysisPage = () => {
     const [dataTableName, setDataTableName] = useState<string>("job_data");
     const conn = useRef<AsyncDuckDBConnection | undefined>(undefined);
     const { navigate } = useNavigation();
+    const [dataReady, setDataReady] = useState(false);
 
     // Function to check which columns are actually available in the database
     const checkAvailableColumns = async () => {
@@ -105,6 +106,7 @@ const DataAnalysisPage = () => {
     };
 
     // Function to add missing columns as a view with default values
+    // New code
     const addMissingColumns = async () => {
         if (!conn.current) return;
 
@@ -127,37 +129,172 @@ const DataAnalysisPage = () => {
 
             console.log("Creating view with missing columns:", missingColumns);
 
+            // First drop the view if it exists to avoid conflicts
+            try {
+                await conn.current.query(`DROP VIEW IF EXISTS job_data_with_missing`);
+            } catch (dropErr) {
+                console.warn("Warning when dropping view:", dropErr);
+                // Continue despite errors - the view might not exist
+            }
+
             // Create SQL for missing columns with zeros
             const missingColumnsSql = missingColumns.map(col => `0 as ${col}`).join(', ');
 
             // Create view with all existing columns plus missing ones
-            await conn.current.query(`
-        DROP VIEW IF EXISTS job_data_with_missing;
-        CREATE VIEW job_data_with_missing AS
+            try {
+                await conn.current.query(`
+                CREATE VIEW job_data_with_missing AS
+                SELECT
+                  *,
+                  ${missingColumnsSql}
+                FROM job_data;
+            `);
+                console.log("Successfully created view with missing columns");
+            } catch (createErr) {
+                console.error("Failed to create view with missing columns:", createErr);
+                // Fall back to using the base table instead
+                console.log("Falling back to using job_data table directly");
+                setDataTableName("job_data");
+                return;
+            }
+
+            // Verify the view was created correctly
+            try {
+                // Check the view to make sure all columns are present
+                const viewCheck = await conn.current.query(`
+                SELECT * FROM job_data_with_missing LIMIT 1
+            `);
+
+                const viewColumns = viewCheck.schema.fields.map(f => f.name);
+                console.log("Columns in enhanced view:", viewColumns);
+
+                // Check that all expected columns are present
+                const allExpectedColumns = [...availableColumns, ...missingColumns];
+                const missingAfterCreation = allExpectedColumns.filter(col => !viewColumns.includes(col));
+
+                if (missingAfterCreation.length > 0) {
+                    console.error("View creation incomplete. Still missing columns:", missingAfterCreation);
+                    // Fall back to using the base table
+                    setDataTableName("job_data");
+                    return;
+                }
+
+                // Update availableColumns with the verified columns
+                setAvailableColumns(viewColumns);
+
+                // Only update dataTableName once we're sure the view is good
+                console.log("Initial view check passed, now verifying view is accessible...");
+
+                // Add a slight delay to ensure view is committed
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                // Do a secondary verification that the view exists and is accessible
+                const viewExists = await verifyViewExists("job_data_with_missing");
+                if (viewExists) {
+                    console.log("View verification successful, using job_data_with_missing");
+                    setDataTableName("job_data_with_missing");
+                } else {
+                    console.warn("View verification failed in second check, falling back to job_data");
+                    setDataTableName("job_data");
+                }
+            } catch (verifyErr) {
+                console.error("Error verifying view:", verifyErr);
+                // Fall back to using the base table
+                console.log("View verification failed, falling back to job_data table");
+                setDataTableName("job_data");
+            }
+        } catch (err) {
+            console.error("Error in addMissingColumns:", err);
+            // Fall back to base table on any error
+            setDataTableName("job_data");
+        }
+    };
+
+    const createMissingColumnsTable = async () => {
+        if (!conn.current) return;
+
+        try {
+            console.log("Creating table with complete columns...");
+
+            // Check which columns we need to add
+            const expectedColumns = [
+                "value_cpuuser", "value_gpu", "value_memused",
+                "value_memused_minus_diskcache", "value_nfs", "value_block"
+            ];
+
+            const missingColumns = expectedColumns.filter(col => !availableColumns.includes(col));
+
+            if (missingColumns.length === 0) {
+                console.log("No missing columns need to be added");
+                setDataTableName("job_data");
+                return;
+            }
+
+            console.log("Creating table with missing columns:", missingColumns);
+
+            // Drop the table if it exists
+            try {
+                await conn.current.query(`DROP TABLE IF EXISTS job_data_complete`);
+            } catch (dropErr) {
+                console.warn("Warning when dropping table:", dropErr);
+            }
+
+            // Create SQL for missing columns with zeros
+            const missingColumnsSql = missingColumns.map(col => `0 as ${col}`).join(', ');
+
+            // Create table with all existing columns plus missing ones
+            try {
+                await conn.current.query(`
+        CREATE TABLE job_data_complete AS
         SELECT
           *,
           ${missingColumnsSql}
         FROM job_data;
       `);
+                console.log("Successfully created table with missing columns");
 
-            console.log("Created view with missing columns");
-
-            // Check the view to make sure all columns are present
-            const viewCheck = await conn.current.query(`
-        SELECT * FROM job_data_with_missing LIMIT 1
+                // Verify table was created correctly
+                const tableCheck = await conn.current.query(`
+        SELECT COUNT(*) as count FROM job_data_complete
       `);
+                const count = tableCheck.toArray()[0].count;
+                console.log(`Created complete table with ${count} rows`);
 
-            const viewColumns = viewCheck.schema.fields.map(f => f.name);
-            console.log("Columns in enhanced view:", viewColumns);
-
-            // Update availableColumns
-            setAvailableColumns(viewColumns);
-
-            // Update dataTableName to use the view
-            setDataTableName("job_data_with_missing");
-
+                // Set the dataTableName to use the new table
+                setDataTableName("job_data_complete");
+            } catch (err) {
+                console.error("Error creating complete table:", err);
+                setDataTableName("job_data");
+            }
         } catch (err) {
-            console.error("Error adding missing columns:", err);
+            console.error("Error in createMissingColumnsTable:", err);
+            setDataTableName("job_data");
+        }
+    };
+
+    const verifyViewExists = async (viewName: string): Promise<boolean> => {
+        if (!conn.current) return false;
+
+        try {
+            // First check if it exists as a view
+            const viewCheck = await conn.current.query(`
+      SELECT name FROM sqlite_master 
+      WHERE type='view' AND name='${viewName}'
+    `);
+
+            if (viewCheck.toArray().length > 0) {
+                // Double-check we can actually query it
+                const dataCheck = await conn.current.query(`
+        SELECT * FROM ${viewName} LIMIT 1
+      `);
+                console.log(`View ${viewName} verified and accessible`);
+                return true;
+            }
+
+            return false;
+        } catch (err) {
+            console.error(`Error verifying view ${viewName}:`, err);
+            return false;
         }
     };
 
@@ -323,17 +460,40 @@ const DataAnalysisPage = () => {
                 setDataLoading(true);
                 setLoadError(null);
 
+                // Reset the table name to avoid inconsistencies
+                setDataTableName("job_data");
+
                 // Close any existing connection
                 if (conn.current) {
-                    await conn.current.close();
+                    try {
+                        await conn.current.close();
+                        console.log("Closed existing database connection");
+                    } catch (closeErr) {
+                        console.warn("Warning when closing connection:", closeErr);
+                    }
                 }
 
                 // Create a new connection
-                conn.current = await db.connect();
+                try {
+                    conn.current = await db.connect();
+                    console.log("Created new database connection");
+                } catch (connErr) {
+                    console.error("Failed to create database connection:", connErr);
+                    setLoadError("Could not connect to database: " +
+                        (connErr instanceof Error ? connErr.message : "Unknown error"));
+                    setDataLoading(false);
+                    return;
+                }
 
-                // Set up environment
-                await conn.current.query("LOAD icu");
-                await conn.current.query("SET TimeZone='America/New_York'");
+                // Set up environment with better error handling
+                try {
+                    await conn.current.query("LOAD icu");
+                    await conn.current.query("SET TimeZone='America/New_York'");
+                    console.log("Database environment setup complete");
+                } catch (envErr) {
+                    console.warn("Non-critical warning when setting up environment:", envErr);
+                    // Continue despite errors - these settings aren't critical
+                }
 
                 // If using demo data or no query exists, create demo data directly
                 let shouldCreateDemoData = useDemoData;
@@ -429,9 +589,62 @@ const DataAnalysisPage = () => {
                     })
                 );
 
-                // Check available columns and add missing ones if needed
-                checkAvailableColumns();
-                addMissingColumns();
+                // Check available columns and create a complete table
+                await checkAvailableColumns();
+                await createMissingColumnsTable();
+
+                // Add a delay to ensure table is fully committed
+                await new Promise(resolve => setTimeout(resolve, 200));
+
+                // Verify the table exists after waiting
+                try {
+                    const finalCheck = await conn.current.query(`
+    SELECT COUNT(*) as count FROM ${dataTableName}
+  `);
+                    const finalCount = finalCheck.toArray()[0].count;
+                    console.log(`Final verification: ${dataTableName} has ${finalCount} rows`);
+                } catch (err) {
+                    console.error(`Failed to verify ${dataTableName}, falling back to job_data`);
+                    setDataTableName("job_data");
+                }
+
+                try {
+                    const finalTableCheck = await conn.current.query(`
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='${dataTableName}'
+    `);
+
+                    if (finalTableCheck.toArray().length === 0) {
+                        // Try to check if it's a view instead
+                        const viewCheck = await conn.current.query(`
+            SELECT name FROM sqlite_master 
+            WHERE type='view' AND name='${dataTableName}'
+        `);
+
+                        if (viewCheck.toArray().length === 0) {
+                            console.error(`Table/view "${dataTableName}" does not exist after data load!`);
+                            // Fall back to job_data if it exists
+                            const baseTableCheck = await conn.current.query(`
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='job_data'
+            `);
+
+                            if (baseTableCheck.toArray().length > 0) {
+                                console.log("Falling back to job_data table");
+                                setDataTableName("job_data");
+                            } else {
+                                throw new Error(`Neither "${dataTableName}" nor "job_data" exist in the database`);
+                            }
+                        } else {
+                            console.log(`"${dataTableName}" exists as a view`);
+                        }
+                    } else {
+                        console.log(`"${dataTableName}" exists as a table`);
+                    }
+                } catch (err) {
+                    console.error("Error checking final table consistency:", err);
+                    // Don't throw here, as we already have data loaded, just log the error
+                }
 
                 console.log('Data load complete');
                 setDataLoading(false);
@@ -469,9 +682,33 @@ const DataAnalysisPage = () => {
         loadData(true);
     };
 
+    useEffect(() => {
+        const checkDataReady = async () => {
+            if (db && conn.current && !dataloading && !loading) {
+                try {
+                    // Verify we can actually query the table/view
+                    const check = await conn.current.query(`
+                    SELECT COUNT(*) as count FROM ${dataTableName} LIMIT 1
+                `);
+                    console.log(`Data readiness check: ${dataTableName} is accessible`);
+                    setDataReady(true);
+                } catch (err) {
+                    console.error(`Data readiness check failed for ${dataTableName}:`, err);
+                    setDataReady(false);
+                    // Try to recover by falling back to job_data
+                    setDataTableName("job_data");
+                }
+            } else {
+                setDataReady(false);
+            }
+        };
+
+        checkDataReady();
+    }, [db, conn.current, dataloading, loading, dataTableName]);
+
     return (
         <div className="bg-black min-h-screen flex flex-col">
-            {shouldShowLoading ? (
+            {shouldShowLoading || !dataReady ? (
                 <>
                     {console.log('Rendering loading state')}
                     <LoadingAnimation />

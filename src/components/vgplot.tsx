@@ -31,6 +31,7 @@ export const column_pretty_names = new Map([
     ["value_block", "Block Usage"],
 ]);
 
+// New code
 const VgPlot: React.FC<VgPlotProps> = ({
                                            db,
                                            conn,
@@ -47,6 +48,8 @@ const VgPlot: React.FC<VgPlotProps> = ({
     const [windowWidth, setWindowWidth] = useState(0);
     const [windowHeight, setWindowHeight] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const [domReady, setDomReady] = useState(false);
+    const [retryCount, setRetryCount] = useState(0);
     const plotsRef = useRef<HTMLDivElement | null>(null);
 
     // Get a descriptive title for the plot
@@ -75,6 +78,14 @@ const VgPlot: React.FC<VgPlotProps> = ({
         return () => window.removeEventListener("resize", updateDimensions);
     }, []);
 
+    useEffect(() => {
+        // Check if the ref is attached to the DOM
+        if (plotsRef.current && !domReady) {
+            console.log(`DEBUG: DOM element for ${columnName} plot is now ready`);
+            setDomReady(true);
+        }
+    }, [plotsRef.current, columnName, domReady]);
+
     const needsSpecialScaling = (columnName: string, min: number, max: number): boolean => {
         // If it's block usage or has very small values
         if (columnName === 'value_block') {
@@ -91,8 +102,27 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
     // Set up the visualization
     const setupDb = useCallback(async () => {
-        if (dbLoading || !db || dataLoading || !conn || !plotsRef.current) {
+        if (dbLoading || !db || dataLoading || !conn) {
             return;
+        }
+
+        if (!plotsRef.current) {
+            // Container not ready yet, retry a few times before showing error
+            if (retryCount < 5) {
+                console.log(`DEBUG: Plot container not ready for ${columnName}, retry ${retryCount + 1}/5`);
+                setTimeout(() => {
+                    setRetryCount(prev => prev + 1);
+                }, 300); // Retry after a short delay
+                return;
+            } else {
+                setError(`Unable to render plot: container element not available after ${retryCount} attempts`);
+                return;
+            }
+        }
+
+        // Reset retry count if we got here
+        if (retryCount > 0) {
+            setRetryCount(0);
         }
 
         try {
@@ -100,11 +130,17 @@ const VgPlot: React.FC<VgPlotProps> = ({
             try {
                 console.log(`DEBUG: Checking for column "${columnName}" in table "${tableName}"`);
 
-                // First, verify the table exists
-                const tableCheck = await conn.query(`
-          SELECT name FROM sqlite_master 
-          WHERE type='table' AND name='${tableName}'
-        `);
+                let tableCheck;
+                try {
+                    tableCheck = await conn.query(`
+                        SELECT name FROM sqlite_master 
+                        WHERE type='table' AND name='${tableName}'
+                    `);
+                    console.log(`DEBUG: Table check for "${tableName}" returned ${tableCheck.toArray().length} results`);
+                } catch (tableCheckError) {
+                    console.error(`DEBUG: Error checking table "${tableName}":`, tableCheckError);
+                    throw new Error(`Unable to verify table "${tableName}": ${tableCheckError instanceof Error ? tableCheckError.message : 'Unknown error'}`);
+                }
 
                 if (tableCheck.toArray().length === 0) {
                     console.error(`DEBUG: Table "${tableName}" does not exist!`);
@@ -773,8 +809,11 @@ const VgPlot: React.FC<VgPlotProps> = ({
     ]);
 
     useEffect(() => {
-        setupDb();
-    }, [setupDb]);
+        if (domReady) {
+            console.log(`DEBUG: Running setupDb for ${columnName} now that DOM is ready`);
+            setupDb();
+        }
+    }, [setupDb, domReady, columnName, retryCount]);
 
     if (error) {
         return (
