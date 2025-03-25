@@ -488,10 +488,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
                                     })
                                 );
 
-                                console.log(`DEBUG: Created enhanced plot for Block usage`);
-
-                                // Early return since we've created the plot
-                                return;
+                                // console.log(`DEBUG: Created enhanced plot for Block usage`);
                             } catch (blockErr) {
                                 console.error(`DEBUG: Error creating enhanced Block usage plot:`, blockErr);
                                 // Fall through to regular approach if this fails
