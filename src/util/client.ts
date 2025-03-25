@@ -1,6 +1,5 @@
-// client.ts
-import { AsyncDuckDB } from "duckdb-wasm-kit";
-import { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
+import {AsyncDuckDB} from "duckdb-wasm-kit";
+import {AsyncDuckDBConnection} from "@duckdb/duckdb-wasm";
 
 interface QueryResult {
     transferId?: string;
@@ -116,6 +115,33 @@ class TimeSeriesClient {
                 const tempRows = await conn.query(`SELECT COUNT(*) as count FROM ${tempTableName};`);
                 const tempCount = tempRows.toArray()[0].count;
                 console.log(`DEBUG: Temporary table contains ${tempCount} rows`);
+
+                const columnDebug = await conn.query(`SELECT * FROM ${tempTableName} LIMIT 1`);
+                console.log("DEBUG: Downloaded file columns:",
+                    columnDebug.schema.fields.map(f => f.name));
+
+                // Debug the target table structure before insert
+                // const targetDebug = await conn.query(`SELECT * FROM job_data_small LIMIT 0`);
+                // console.log("DEBUG: Target table columns:",
+                //     targetDebug.schema.fields.map(f => f.name));
+
+                // Modify the insert to explicitly name all columns
+                await conn.query(`
+                  INSERT INTO job_data_small (
+                    time, submit_time, start_time, end_time, timelimit, 
+                    nhosts, ncores, account, queue, host, jid, unit, 
+                    jobname, exitcode, host_list, username, value_cpuuser, 
+                    value_gpu, value_memused, value_memused_minus_diskcache, 
+                    value_nfs, value_block
+                  )
+                  SELECT
+                    time, submit_time, start_time, end_time, timelimit, 
+                    nhosts, ncores, account, queue, host, jid, unit, 
+                    jobname, exitcode, host_list, username, value_cpuuser, 
+                    value_gpu, value_memused, value_memused_minus_diskcache, 
+                    value_nfs, value_block
+                  FROM ${tempTableName};
+                `);
 
                 if (tempCount > 0) {
                     // Insert data from temp table to job_data_small table
@@ -333,7 +359,8 @@ async function startSingleQuery(
         await conn.close();
     } catch (error) {
         console.error('Error in startSingleQuery:', error);
-        throw error;
+        // Don't attempt to generate demo data as a fallback
+        throw new Error(`Could not load real data: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
 }
 
@@ -363,4 +390,4 @@ function extractTimeBounds(query: string) {
     };
 }
 
-export { TimeSeriesClient, startSingleQuery };
+export {TimeSeriesClient, startSingleQuery};
