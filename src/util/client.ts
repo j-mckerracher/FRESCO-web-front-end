@@ -1,4 +1,3 @@
-// client.ts
 import {AsyncDuckDB} from "duckdb-wasm-kit";
 import {AsyncDuckDBConnection} from "@duckdb/duckdb-wasm";
 
@@ -122,12 +121,12 @@ class TimeSeriesClient {
                     columnDebug.schema.fields.map(f => f.name));
 
                 // Debug the target table structure before insert
-                                const targetDebug = await conn.query(`SELECT * FROM job_data_small LIMIT 0`);
-                                console.log("DEBUG: Target table columns:",
-                                    targetDebug.schema.fields.map(f => f.name));
+                const targetDebug = await conn.query(`SELECT * FROM job_data_small LIMIT 0`);
+                console.log("DEBUG: Target table columns:",
+                    targetDebug.schema.fields.map(f => f.name));
 
                 // Modify the insert to explicitly name all columns
-                                await conn.query(`
+                await conn.query(`
                   INSERT INTO job_data_small (
                     time, submit_time, start_time, end_time, timelimit, 
                     nhosts, ncores, account, queue, host, jid, unit, 
