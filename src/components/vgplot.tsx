@@ -244,42 +244,42 @@ const VgPlot: React.FC<VgPlotProps> = ({
                           WHERE ${columnName} IS NOT NULL
                         `);
 
-                        try {
-                            const statsCheck = await conn.query(`
-                                WITH sample_data AS (
-                                    SELECT ${columnName}
-                                    FROM ${tableName}
-                                    WHERE ${columnName} IS NOT NULL
-                                    ORDER BY time
-                                    LIMIT 100
-                                )
-                                SELECT 
-                                    STDDEV(${columnName}) as std_dev,
-                                    MAX(${columnName}) - MIN(${columnName}) as value_range
-                                FROM sample_data
-                            `);
-
-                            const stats = statsCheck.toArray()[0];
-                            const variationRatio = stats.std_dev / (stats.value_range || 1);
-
-                            console.log(`DEBUG: Pattern check for ${columnName}: std_dev=${stats.std_dev}, range=${stats.value_range}, ratio=${variationRatio}`);
-
-                            // Pure synthetic patterns (sine/cosine) typically have very regular distribution
-                            // This check is less aggressive than the previous one
-                            if (stats.value_range > 10 && variationRatio < 0.05) {
-                                console.warn(`DEBUG: ${columnName} data appears synthetic (variation ratio: ${variationRatio})`);
-                                throw new Error(`No real data available for ${columnName}`);
-                            }
-                        } catch (patternCheckError) {
-                            // If the pattern check itself fails, log but continue
-                            // This ensures the pattern detection doesn't block showing real data
-                            if (!(patternCheckError.message.includes("No real data"))) {
-                                console.warn(`Pattern check error for ${columnName}: ${patternCheckError}`);
-                                // Continue execution - don't re-throw the error
-                            } else {
-                                throw patternCheckError; // Re-throw if it was our "No real data" error
-                            }
-                        }
+                        // try {
+                        //     const statsCheck = await conn.query(`
+                        //         WITH sample_data AS (
+                        //             SELECT ${columnName}
+                        //             FROM ${tableName}
+                        //             WHERE ${columnName} IS NOT NULL
+                        //             ORDER BY time
+                        //             LIMIT 100
+                        //         )
+                        //         SELECT
+                        //             STDDEV(${columnName}) as std_dev,
+                        //             MAX(${columnName}) - MIN(${columnName}) as value_range
+                        //         FROM sample_data
+                        //     `);
+                        //
+                        //     const stats = statsCheck.toArray()[0];
+                        //     const variationRatio = stats.std_dev / (stats.value_range || 1);
+                        //
+                        //     console.log(`DEBUG: Pattern check for ${columnName}: std_dev=${stats.std_dev}, range=${stats.value_range}, ratio=${variationRatio}`);
+                        //
+                        //     // Pure synthetic patterns (sine/cosine) typically have very regular distribution
+                        //     // This check is less aggressive than the previous one
+                        //     if (stats.value_range > 10 && variationRatio < 0.05) {
+                        //         console.warn(`DEBUG: ${columnName} data appears synthetic (variation ratio: ${variationRatio})`);
+                        //         throw new Error(`No real data available for ${columnName}`);
+                        //     }
+                        // } catch (patternCheckError) {
+                        //     // If the pattern check itself fails, log but continue
+                        //     // This ensures the pattern detection doesn't block showing real data
+                        //     if (!(patternCheckError.message.includes("No real data"))) {
+                        //         console.warn(`Pattern check error for ${columnName}: ${patternCheckError}`);
+                        //         // Continue execution - don't re-throw the error
+                        //     } else {
+                        //         throw patternCheckError; // Re-throw if it was our "No real data" error
+                        //     }
+                        // }
 
                         const range = rangeCheck.toArray()[0];
                         console.log(`DEBUG: Value range for ${columnName}: min=${range.min_val}, max=${range.max_val}, count=${range.count}, null_count=${range.null_count}`);
@@ -304,6 +304,22 @@ const VgPlot: React.FC<VgPlotProps> = ({
                         const uniqueId = Date.now().toString() + '_' + Math.floor(Math.random() * 10000);
                         let viewName = `${tableName}_agg_${columnName.replace(/[^a-zA-Z0-9]/g, '_')}_${uniqueId}`;
 
+                        // Check if we have any data points for this column in the time range
+                        const dataPointCheck = await conn.query(`
+                          SELECT COUNT(*) as count 
+                          FROM ${tableName}
+                          WHERE ${columnName} IS NOT NULL AND ${xAxis} IS NOT NULL
+                        `);
+                        const dataPointCount = dataPointCheck.toArray()[0].count;
+
+                        // If no data points, show a message instead of an empty plot
+                        if (dataPointCount === 0) {
+                            setError(`No data points available for ${columnName} in the selected time range`);
+                            return;
+                        }
+                        // Log the range of values to help diagnose scaling issues
+                        console.log(`DEBUG: ${columnName} has ${dataPointCount} data points in range: ${range.min_val} to ${range.max_val}`);
+
                         // Special handling for CPU usage with extreme outliers
                         if (columnName === 'value_cpuuser' && Math.abs(range.min_val) > 1000) {
                             console.log(`DEBUG: Using percentile-based approach for CPU usage with extreme outliers`);
@@ -313,39 +329,39 @@ const VgPlot: React.FC<VgPlotProps> = ({
                                 const robustViewName = `${viewName}_robust`;
 
                                 await conn.query(`
-                  CREATE TEMPORARY VIEW ${robustViewName} AS
-                  WITH percentiles AS (
-                    SELECT
-                      PERCENTILE_CONT(0.01) WITHIN GROUP (ORDER BY ${columnName}) AS p01,
-                      PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${columnName}) AS p99
-                    FROM ${tableName}
-                    WHERE ${columnName} IS NOT NULL AND ${xAxis} IS NOT NULL
-                  ),
-                  robust_data AS (
-                    SELECT 
-                      t.${xAxis},
-                      t.${columnName}
-                    FROM ${tableName} t, percentiles p
-                    WHERE 
-                      t.${columnName} IS NOT NULL AND 
-                      t.${xAxis} IS NOT NULL AND
-                      t.${columnName} BETWEEN p.p01 AND p.p99
-                  )
-                  SELECT 
-                    date_trunc('hour', ${xAxis}) as hour,
-                    AVG(${columnName}) as avg_value,
-                    MIN(${columnName}) as min_value,
-                    MAX(${columnName}) as max_value,
-                    COUNT(*) as count
-                  FROM robust_data
-                  GROUP BY date_trunc('hour', ${xAxis})
-                  ORDER BY hour
-                `);
+                                  CREATE TEMPORARY VIEW ${robustViewName} AS
+                                  WITH percentiles AS (
+                                    SELECT
+                                      PERCENTILE_CONT(0.01) WITHIN GROUP (ORDER BY ${columnName}) AS p01,
+                                      PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${columnName}) AS p99
+                                    FROM ${tableName}
+                                    WHERE ${columnName} IS NOT NULL AND ${xAxis} IS NOT NULL
+                                  ),
+                                  robust_data AS (
+                                    SELECT 
+                                      t.${xAxis},
+                                      t.${columnName}
+                                    FROM ${tableName} t, percentiles p
+                                    WHERE 
+                                      t.${columnName} IS NOT NULL AND 
+                                      t.${xAxis} IS NOT NULL AND
+                                      t.${columnName} BETWEEN p.p01 AND p.p99
+                                  )
+                                  SELECT 
+                                    date_trunc('hour', ${xAxis}) as hour,
+                                    AVG(${columnName}) as avg_value,
+                                    MIN(${columnName}) as min_value,
+                                    MAX(${columnName}) as max_value,
+                                    COUNT(*) as count
+                                  FROM robust_data
+                                  GROUP BY date_trunc('hour', ${xAxis})
+                                  ORDER BY hour
+                                `);
 
                                 // Log the percentile-based view
                                 const robustStats = await conn.query(`
-                  SELECT * FROM ${robustViewName} LIMIT 10
-                `);
+                                  SELECT * FROM ${robustViewName} LIMIT 10
+                                `);
 
                                 console.log(`DEBUG: Robust view stats for CPU usage (excluding extreme outliers):`);
                                 const robustData = robustStats.toArray();
@@ -355,11 +371,11 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
                                 // Get new y-domain range from the robust view
                                 const robustRange = await conn.query(`
-                  SELECT 
-                    MIN(min_value) as min_val,
-                    MAX(max_value) as max_val
-                  FROM ${robustViewName}
-                `);
+                                  SELECT 
+                                    MIN(min_value) as min_val,
+                                    MAX(max_value) as max_val
+                                  FROM ${robustViewName}
+                                `);
 
                                 const newRange = robustRange.toArray()[0];
                                 const newYMin = newRange.min_val;
@@ -422,7 +438,14 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
                                 console.log(`DEBUG: Created robust plot for CPU usage excluding extreme outliers`);
 
-                                // Early return since we've created the plot
+                                // Mount the plot before returning
+                                if (plotsRef.current) {
+                                    // Clear any previous content and add the new plot
+                                    plotsRef.current.innerHTML = '';
+                                    plotsRef.current.appendChild(plot);
+                                }
+
+                                // Return after properly mounting the plot
                                 return;
                             } catch (robustErr) {
                                 console.error(`DEBUG: Error creating robust plot for CPU usage:`, robustErr);
@@ -436,26 +459,26 @@ const VgPlot: React.FC<VgPlotProps> = ({
                             try {
                                 // Create a regular aggregated view
                                 await conn.query(`
-                  CREATE TEMPORARY VIEW ${viewName} AS
-                  SELECT 
-                    date_trunc('hour', ${xAxis}) as hour,
-                    AVG(${columnName}) as avg_value,
-                    MIN(${columnName}) as min_value,
-                    MAX(${columnName}) as max_value,
-                    COUNT(*) as count
-                  FROM ${tableName}
-                  WHERE ${columnName} IS NOT NULL AND ${xAxis} IS NOT NULL
-                  GROUP BY date_trunc('hour', ${xAxis})
-                  ORDER BY hour
-                `);
+                                  CREATE TEMPORARY VIEW ${viewName} AS
+                                  SELECT 
+                                    date_trunc('hour', ${xAxis}) as hour,
+                                    AVG(${columnName}) as avg_value,
+                                    MIN(${columnName}) as min_value,
+                                    MAX(${columnName}) as max_value,
+                                    COUNT(*) as count
+                                  FROM ${tableName}
+                                  WHERE ${columnName} IS NOT NULL AND ${xAxis} IS NOT NULL
+                                  GROUP BY date_trunc('hour', ${xAxis})
+                                  ORDER BY hour
+                                `);
 
-                                // After creating the view, let's log some sample data
-                                try {
-                                    const sampleData = await conn.query(`
-                    SELECT * FROM ${viewName} 
-                    ORDER BY hour
-                    LIMIT 20
-                  `);
+                                                // After creating the view, let's log some sample data
+                                                try {
+                                                    const sampleData = await conn.query(`
+                                    SELECT * FROM ${viewName} 
+                                    ORDER BY hour
+                                    LIMIT 20
+                                  `);
 
                                     const samples = sampleData.toArray();
                                     console.log(`DEBUG: Sample data from Block usage view (${viewName}):`);
@@ -526,6 +549,13 @@ const VgPlot: React.FC<VgPlotProps> = ({
                                 );
 
                                 // console.log(`DEBUG: Created enhanced plot for Block usage`);
+                                // Mount the plot before continuing
+                                if (plotsRef.current) {
+                                    plotsRef.current.innerHTML = '';
+                                    plotsRef.current.appendChild(plot);
+                                    console.log(`DEBUG: Mounted Block usage plot to DOM`);
+                                }
+                                return;
                             } catch (blockErr) {
                                 console.error(`DEBUG: Error creating enhanced Block usage plot:`, blockErr);
                                 // Fall through to regular approach if this fails
@@ -570,7 +600,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
                                 // If we can't create the view, we'll try using the table directly
                                 // This is less efficient but should still work
                                 plot = vg.plot(
-                                    vg.lineY(vg.from(tableName, { filterBy: crossFilter }), {
+                                    vg.lineY(vg.from(tableName, {filterBy: crossFilter}), {
                                         x: xAxis,
                                         y: columnName,
                                         stroke: BOIILERMAKER_GOLD,
@@ -608,11 +638,16 @@ const VgPlot: React.FC<VgPlotProps> = ({
                         const yMin = range.min_val;
                         const yMax = range.max_val;
                         const yRange = yMax - yMin;
-                        const yBuffer = yRange * 0.1;
+
+                        // If the range is very small, use a minimum range to ensure visibility
+                        const effectiveRange = Math.max(yRange, Math.abs(yMax) * 0.1 || 1);
+                        const yBuffer = effectiveRange * 0.1;
+
+                        // Ensure there's always some vertical space to see the data
                         const yDomainMin = yMin - yBuffer;
                         const yDomainMax = yMax + yBuffer;
 
-                        console.log(`DEBUG: Y domain range: ${yDomainMin} to ${yDomainMax}`);
+                        console.log(`DEBUG: ${columnName} Y domain: ${yDomainMin} to ${yDomainMax} (effective range: ${effectiveRange})`);
 
                         // Use the aggregated view for better performance and visibility (standard case)
                         plot = vg.plot(
@@ -706,7 +741,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
                                 // Create plot with scaled values
                                 plot = vg.plot(
-                                    vg.rectY(vg.from(transformedView, { filterBy: crossFilter }), {
+                                    vg.rectY(vg.from(transformedView, {filterBy: crossFilter}), {
                                         x: vg.bin(`${columnName}_scaled`),
                                         y: vg.count(),
                                         inset: 1,
@@ -714,7 +749,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
                                     }),
                                     vg.marginLeft(60),
                                     vg.marginBottom(55),
-                                    vg.intervalX({ as: crossFilter }),
+                                    vg.intervalX({as: crossFilter}),
                                     vg.xDomain(vg.Fixed),
                                     vg.width(Math.min(windowWidth * width, 800)),
                                     vg.height(Math.min(windowHeight * height, 300)),
@@ -742,7 +777,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
                         // Regular histogram creation (no scaling needed)
                         plot = vg.plot(
-                            vg.rectY(vg.from(tableName, { filterBy: crossFilter }), {
+                            vg.rectY(vg.from(tableName, {filterBy: crossFilter}), {
                                 x: vg.bin(columnName),
                                 y: vg.count(),
                                 inset: 1,
@@ -750,7 +785,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
                             }),
                             vg.marginLeft(60),
                             vg.marginBottom(55),
-                            vg.intervalX({ as: crossFilter }),
+                            vg.intervalX({as: crossFilter}),
                             vg.xDomain(vg.Fixed),
                             vg.width(Math.min(windowWidth * width, 800)),
                             vg.height(Math.min(windowHeight * height, 300)),
@@ -780,7 +815,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
                         const highlight = vg.Selection.intersect();
 
                         plot = vg.plot(
-                            vg.rectY(vg.from(tableName, { filterBy: crossFilter }), {
+                            vg.rectY(vg.from(tableName, {filterBy: crossFilter}), {
                                 x: columnName,
                                 y: vg.count(),
                                 inset: 1,
@@ -788,9 +823,9 @@ const VgPlot: React.FC<VgPlotProps> = ({
                             }),
                             vg.marginLeft(60),
                             vg.marginBottom(55),
-                            vg.toggleX({ as: crossFilter }),
-                            vg.toggleX({ as: highlight }),
-                            vg.highlight({ by: highlight }),
+                            vg.toggleX({as: crossFilter}),
+                            vg.toggleX({as: highlight}),
+                            vg.highlight({by: highlight}),
                             vg.xDomain(vg.Fixed),
                             vg.width(Math.min(windowWidth * width, 800)),
                             vg.height(Math.min(windowHeight * height, 300)),
@@ -818,8 +853,9 @@ const VgPlot: React.FC<VgPlotProps> = ({
                 // Clear any previous content and add the new plot
                 plotsRef.current.innerHTML = '';
                 plotsRef.current.appendChild(plot);
+                console.log(`DEBUG: Successfully mounted ${columnName} plot to DOM`);
             } else {
-                console.error("Plot or container reference is missing");
+                console.error(`Plot or container reference is missing for ${columnName}`);
                 setError("Could not render plot - container is missing");
             }
         } catch (err) {
