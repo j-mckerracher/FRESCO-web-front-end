@@ -361,16 +361,13 @@ const QueryBuilder = () => {
             console.error("Error in getParquetFromAPI:", err);
             const errorMessage = err instanceof Error ? err.message : "Unknown error loading data";
 
-            // Only set error if it hasn't been set in a more specific catch block
-            if (!error) {
-                setError(errorMessage);
-            }
+            setError(errorMessage);
         } finally {
             if (conn) {
                 conn.close();
             }
         }
-    }, [db, loading, selectedDateRange, error]);
+    }, [db, loading, selectedDateRange]);
 
     useEffect(() => {
         if (db && !loading && !histogramData && selectedDateRange) {
@@ -383,6 +380,10 @@ const QueryBuilder = () => {
         console.log(`DEBUG: Date range selected - start: ${startDate.toISOString()}, end: ${endDate.toISOString()}`);
         setSelectedDateRange({ start: startDate, end: endDate });
         setCurrentStep(WorkflowStep.HISTOGRAM_VIEW);
+
+        // Ensure error state is cleared and histogram data is reset to trigger a new data fetch
+        setError(null);
+        setHistogramData(false);
     };
 
     // Reset to date selection step
