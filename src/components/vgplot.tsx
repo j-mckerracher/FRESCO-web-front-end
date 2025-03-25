@@ -306,16 +306,17 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
                         // Check if we have any data points for this column in the time range
                         const dataPointCheck = await conn.query(`
-                          SELECT COUNT(*) as count 
-                          FROM ${tableName}
-                          WHERE ${columnName} IS NOT NULL AND ${xAxis} IS NOT NULL
-                        `);
+                              SELECT COUNT(*) as count 
+                              FROM ${tableName}
+                              WHERE ${columnName} IS NOT NULL AND ${columnName} != 0 AND ${xAxis} IS NOT NULL
+                            `);
                         const dataPointCount = dataPointCheck.toArray()[0].count;
 
-                        // If no data points, show a message instead of an empty plot
+                        // If no data points or all zero values, show a message instead of an empty plot
                         if (dataPointCount === 0) {
-                            setError(`No data points available for ${columnName} in the selected time range`);
-                            return;
+                            console.log(`DEBUG: No data points for ${columnName}, showing error message instead of plot`);
+                            setError(`No non-zero data points available for ${columnName} in the selected time range`);
+                            return; // This return statement needs to stop all further execution
                         }
                         // Log the range of values to help diagnose scaling issues
                         console.log(`DEBUG: ${columnName} has ${dataPointCount} data points in range: ${range.min_val} to ${range.max_val}`);
@@ -561,31 +562,144 @@ const VgPlot: React.FC<VgPlotProps> = ({
                                 // Fall through to regular approach if this fails
                             }
                         }
+                        // Special handling for NFS usage with extreme outliers
+                        else if (columnName === 'value_nfs' && Math.abs(range.min_val) > 10 && Math.abs(range.max_val) > 10) {
+                            console.log(`DEBUG: Using percentile-based approach for NFS usage with extreme outliers`);
+
+                            try {
+                                // Create a percentile-based view that excludes the most extreme values
+                                const robustViewName = `${viewName}_robust`;
+
+                                await conn.query(`
+                                  CREATE TEMPORARY VIEW ${robustViewName} AS
+                                  WITH percentiles AS (
+                                    SELECT
+                                      PERCENTILE_CONT(0.02) WITHIN GROUP (ORDER BY ${columnName}) AS p02,
+                                      PERCENTILE_CONT(0.98) WITHIN GROUP (ORDER BY ${columnName}) AS p98
+                                    FROM ${tableName}
+                                    WHERE ${columnName} IS NOT NULL AND ${xAxis} IS NOT NULL
+                                  ),
+                                  robust_data AS (
+                                    SELECT 
+                                      t.${xAxis},
+                                      t.${columnName}
+                                    FROM ${tableName} t, percentiles p
+                                    WHERE 
+                                      t.${columnName} IS NOT NULL AND 
+                                      t.${xAxis} IS NOT NULL AND
+                                      t.${columnName} BETWEEN p.p02 AND p.p98
+                                  )
+                                  SELECT 
+                                    date_trunc('hour', ${xAxis}) as hour,
+                                    AVG(${columnName}) as avg_value,
+                                    MIN(${columnName}) as min_value,
+                                    MAX(${columnName}) as max_value,
+                                    COUNT(*) as count
+                                  FROM robust_data
+                                  GROUP BY date_trunc('hour', ${xAxis})
+                                  ORDER BY hour
+    `);
+
+                                // Log the percentile-based view
+                                const robustStats = await conn.query(`
+      SELECT * FROM ${robustViewName} LIMIT 10
+    `);
+
+                                console.log(`DEBUG: Robust view stats for NFS usage (excluding extreme outliers):`);
+                                const robustData = robustStats.toArray();
+                                robustData.forEach((row, i) => {
+                                    console.log(`  Hour ${i}: min=${row.min_value}, max=${row.max_value}, avg=${row.avg_value}, count=${row.count}`);
+                                });
+
+                                // Create the plot using the robust data view
+                                plot = vg.plot(
+                                    vg.lineY(vg.from(robustViewName), {
+                                        x: "hour",
+                                        y: "avg_value",
+                                        stroke: BOIILERMAKER_GOLD,
+                                        strokeWidth: 3,
+                                    }),
+                                    vg.areaY(vg.from(robustViewName), {
+                                        x: "hour",
+                                        y1: "min_value",
+                                        y2: "max_value",
+                                        fillOpacity: 0.2,
+                                        fill: BOIILERMAKER_GOLD
+                                    }),
+                                    vg.dotY(vg.from(robustViewName), {
+                                        x: "hour",
+                                        y: "avg_value",
+                                        fill: BOIILERMAKER_GOLD,
+                                        stroke: "#000000",
+                                        strokeWidth: 1
+                                    }),
+                                    vg.panZoomX(crossFilter),
+                                    vg.marginLeft(75),
+                                    vg.marginBottom(50),
+                                    vg.marginTop(30),
+                                    vg.marginRight(30),
+                                    vg.width(Math.min(windowWidth * width, 800)),
+                                    vg.height(400),
+                                    vg.xScale('time'),
+                                    vg.yScale('linear'),
+                                    vg.xLabel("Time"),
+                                    vg.yLabel(`${column_pretty_names.get(columnName) || columnName} (excluding outliers)`),
+                                    vg.style({
+                                        color: "#FFFFFF",
+                                        backgroundColor: "transparent",
+                                        fontSize: "14px",
+                                        ".vgplot-x-axis line, .vgplot-y-axis line": {
+                                            stroke: "#FFFFFF",
+                                        },
+                                        ".vgplot-x-axis text, .vgplot-y-axis text": {
+                                            fill: "#FFFFFF",
+                                        },
+                                        ".vgplot-marks path": {
+                                            strokeWidth: "3px"
+                                        },
+                                        ".vgplot-marks circle": {
+                                            r: "5px"
+                                        }
+                                    })
+                                );
+
+                                // Mount the plot before returning
+                                if (plotsRef.current) {
+                                    plotsRef.current.innerHTML = '';
+                                    plotsRef.current.appendChild(plot);
+                                    console.log(`DEBUG: Mounted NFS usage plot to DOM`);
+                                }
+                                return;
+                            } catch (robustErr) {
+                                console.error(`DEBUG: Error creating robust plot for NFS usage:`, robustErr);
+                                // Fall through to regular approach if this fails
+                            }
+                        }
                         // Default case for regular columns
                         else {
                             try {
                                 // Create an aggregated view with hourly averages for regular columns
                                 await conn.query(`
-                  CREATE TEMPORARY VIEW ${viewName} AS
-                  SELECT 
-                    date_trunc('hour', ${xAxis}) as hour,
-                    AVG(${columnName}) as avg_value,
-                    COUNT(*) as count
-                  FROM ${tableName}
-                  WHERE ${columnName} IS NOT NULL AND ${xAxis} IS NOT NULL
-                  GROUP BY date_trunc('hour', ${xAxis})
-                  ORDER BY hour
-                `);
+                                  CREATE TEMPORARY VIEW ${viewName} AS
+                                  SELECT 
+                                    date_trunc('hour', ${xAxis}) as hour,
+                                    AVG(${columnName}) as avg_value,
+                                    COUNT(*) as count
+                                  FROM ${tableName}
+                                  WHERE ${columnName} IS NOT NULL AND ${xAxis} IS NOT NULL
+                                  GROUP BY date_trunc('hour', ${xAxis})
+                                  ORDER BY hour
+                                `);
 
                                 console.log(`DEBUG: Created standard aggregated view for line plot`);
 
                                 // After creating the view, log sample data for debugging
                                 try {
                                     const sampleData = await conn.query(`
-                    SELECT * FROM ${viewName} 
-                    ORDER BY hour
-                    LIMIT 20
-                  `);
+                                        SELECT * FROM ${viewName} 
+                                        ORDER BY hour
+                                        LIMIT 20
+                                      `);
 
                                     const samples = sampleData.toArray();
                                     console.log(`DEBUG: Sample data from aggregated view (${viewName}):`);
@@ -883,7 +997,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
             console.log(`DEBUG: Running setupDb for ${columnName} now that DOM is ready`);
             setupDb();
         }
-    }, [setupDb, domReady, columnName, retryCount]);
+    }, [setupDb, domReady, columnName, retryCount, error]);
 
     if (error) {
         return (
