@@ -235,14 +235,51 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
                         // Check data range
                         const rangeCheck = await conn.query(`
-              SELECT 
-                MIN(${columnName}) as min_val,
-                MAX(${columnName}) as max_val,
-                COUNT(*) as count,
-                COUNT(CASE WHEN ${columnName} IS NULL THEN 1 END) as null_count
-              FROM ${tableName}
-              WHERE ${columnName} IS NOT NULL
-            `);
+                          SELECT 
+                            MIN(${columnName}) as min_val,
+                            MAX(${columnName}) as max_val,
+                            COUNT(*) as count,
+                            COUNT(CASE WHEN ${columnName} IS NULL THEN 1 END) as null_count
+                          FROM ${tableName}
+                          WHERE ${columnName} IS NOT NULL
+                        `);
+
+                        try {
+                            const statsCheck = await conn.query(`
+                                WITH sample_data AS (
+                                    SELECT ${columnName}
+                                    FROM ${tableName}
+                                    WHERE ${columnName} IS NOT NULL
+                                    ORDER BY time
+                                    LIMIT 100
+                                )
+                                SELECT 
+                                    STDDEV(${columnName}) as std_dev,
+                                    MAX(${columnName}) - MIN(${columnName}) as value_range
+                                FROM sample_data
+                            `);
+
+                            const stats = statsCheck.toArray()[0];
+                            const variationRatio = stats.std_dev / (stats.value_range || 1);
+
+                            console.log(`DEBUG: Pattern check for ${columnName}: std_dev=${stats.std_dev}, range=${stats.value_range}, ratio=${variationRatio}`);
+
+                            // Pure synthetic patterns (sine/cosine) typically have very regular distribution
+                            // This check is less aggressive than the previous one
+                            if (stats.value_range > 10 && variationRatio < 0.05) {
+                                console.warn(`DEBUG: ${columnName} data appears synthetic (variation ratio: ${variationRatio})`);
+                                throw new Error(`No real data available for ${columnName}`);
+                            }
+                        } catch (patternCheckError) {
+                            // If the pattern check itself fails, log but continue
+                            // This ensures the pattern detection doesn't block showing real data
+                            if (!(patternCheckError.message.includes("No real data"))) {
+                                console.warn(`Pattern check error for ${columnName}: ${patternCheckError}`);
+                                // Continue execution - don't re-throw the error
+                            } else {
+                                throw patternCheckError; // Re-throw if it was our "No real data" error
+                            }
+                        }
 
                         const range = rangeCheck.toArray()[0];
                         console.log(`DEBUG: Value range for ${columnName}: min=${range.min_val}, max=${range.max_val}, count=${range.count}, null_count=${range.null_count}`);
@@ -817,7 +854,11 @@ const VgPlot: React.FC<VgPlotProps> = ({
             <div className="flex flex-col w-full text-white bg-zinc-900 p-4 rounded-lg min-h-40">
                 <h1 className="text-center text-xl text-red-400">{title}</h1>
                 <div className="flex items-center justify-center flex-1 p-4">
-                    <p className="text-red-400">{error}</p>
+                    <p className="text-red-400">
+                        {error.includes("No real data") ?
+                            "No real data available for this metric in the selected time window" :
+                            error}
+                    </p>
                 </div>
             </div>
         );

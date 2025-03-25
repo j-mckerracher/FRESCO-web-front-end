@@ -561,10 +561,10 @@ const DataAnalysisPage = () => {
                     }
                 }
 
-                // If we haven't loaded data yet, create demo data
+                // If we haven't loaded data yet, don't create demo data
                 if (!dataLoaded) {
-                    console.log("No data loaded yet, creating demo data");
-                    await createDemoData(conn.current);
+                    console.log("No data loaded yet, but not creating demo data");
+                    throw new Error("No real data available for the selected time period");
                 }
 
                 // Verify data was loaded

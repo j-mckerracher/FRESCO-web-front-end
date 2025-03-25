@@ -359,7 +359,8 @@ async function startSingleQuery(
         await conn.close();
     } catch (error) {
         console.error('Error in startSingleQuery:', error);
-        throw error;
+        // Don't attempt to generate demo data as a fallback
+        throw new Error(`Could not load real data: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
 }
 
