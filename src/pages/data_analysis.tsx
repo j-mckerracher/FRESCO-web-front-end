@@ -45,6 +45,7 @@ const value_to_numerical = new Map(
 const DataAnalysisPage = () => {
     console.log('DataAnalysis component rendered');
 
+
     // Use the context instead of the hook directly
     const {
         db,
