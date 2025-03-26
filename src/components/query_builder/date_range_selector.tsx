@@ -1,17 +1,31 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import ButtonPrimary from "@/components/ButtonPrimary";
 
 interface DateRangeSelectorProps {
     maxTimeWindowDays: number;
     onContinue: (startDate: Date, endDate: Date) => void;
+    defaultStartDate?: Date; // Added optional default start date
+    defaultEndDate?: Date;   // Added optional default end date
 }
+
+// Helper function to format Date objects to datetime-local input string format
+const formatDateForInput = (date: Date | undefined): string => {
+    if (!date) return "";
+
+    // Format date as YYYY-MM-DDThh:mm
+    return new Date(date.getTime() - (date.getTimezoneOffset() * 60000))
+        .toISOString()
+        .slice(0, 16);
+};
 
 const DateRangeSelector: React.FC<DateRangeSelectorProps> = ({
                                                                  maxTimeWindowDays,
                                                                  onContinue,
+                                                                 defaultStartDate,
+                                                                 defaultEndDate,
                                                              }) => {
-    const [startDate, setStartDate] = useState<string>("");
-    const [endDate, setEndDate] = useState<string>("");
+    const [startDate, setStartDate] = useState<string>(formatDateForInput(defaultStartDate));
+    const [endDate, setEndDate] = useState<string>(formatDateForInput(defaultEndDate));
     const [error, setError] = useState<string | null>(null);
 
     // Helper to validate the date range
@@ -86,8 +100,8 @@ const DateRangeSelector: React.FC<DateRangeSelectorProps> = ({
             <div className="text-white mb-8 text-center">
                 <span className="block mb-2">Maximum allowed time window:</span>
                 <span className="text-xl font-semibold text-purdue-boilermakerGold">
-          {maxTimeWindowDays} days
-        </span>
+                    {maxTimeWindowDays} days
+                </span>
             </div>
 
             <ButtonPrimary

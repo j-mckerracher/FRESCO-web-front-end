@@ -39,6 +39,9 @@ const LOADING_STAGES = {
     VIEW: { name: 'Setting up data view', weight: 5 }
 };
 
+const DEFAULT_START_DATE = new Date('2023-01-15T00:01:00');
+const DEFAULT_END_DATE = new Date('2023-01-15T23:59:00');
+
 const QueryBuilder = () => {
     const { db, loading } = useDuckDb();
     const [histogramData, setHistogramData] = useState(false);
@@ -413,6 +416,8 @@ const QueryBuilder = () => {
                     <DateRangeSelector
                         maxTimeWindowDays={MAX_TIME_WINDOW_DAYS}
                         onContinue={handleDateRangeContinue}
+                        defaultStartDate={DEFAULT_START_DATE}
+                        defaultEndDate={DEFAULT_END_DATE}
                     />
                 ) : (
                     <>
