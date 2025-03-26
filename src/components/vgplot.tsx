@@ -473,9 +473,9 @@ const VgPlot: React.FC<VgPlotProps> = ({
                                   ORDER BY hour
                                 `);
 
-                                                // After creating the view, let's log some sample data
-                                                try {
-                                                    const sampleData = await conn.query(`
+                                // After creating the view, let's log some sample data
+                                try {
+                                    const sampleData = await conn.query(`
                                     SELECT * FROM ${viewName} 
                                     ORDER BY hour
                                     LIMIT 20
@@ -821,17 +821,73 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
                         // Check data range for special scaling needs
                         const rangeCheck = await conn.query(`
-              SELECT 
-                MIN(${columnName}) as min_val,
-                MAX(${columnName}) as max_val,
-                COUNT(*) as count,
-                COUNT(CASE WHEN ${columnName} IS NULL THEN 1 END) as null_count
-              FROM ${tableName}
-              WHERE ${columnName} IS NOT NULL
-            `);
+                              SELECT 
+                                MIN(${columnName}) as min_val,
+                                MAX(${columnName}) as max_val,
+                                COUNT(*) as count,
+                                COUNT(CASE WHEN ${columnName} IS NULL THEN 1 END) as null_count
+                              FROM ${tableName}
+                              WHERE ${columnName} IS NOT NULL
+                            `);
 
                         const range = rangeCheck.toArray()[0];
                         console.log(`DEBUG: Value range for ${columnName}: min=${range.min_val}, max=${range.max_val}, count=${range.count}, null_count=${range.null_count}`);
+
+                        // Check if this is a BigInt column that needs special handling
+                        const isBigIntColumn = columnName === 'nhosts' || columnName === 'ncores';
+
+                        if (isBigIntColumn) {
+                            console.log(`DEBUG: Using special handling for BigInt column ${columnName}`);
+
+                            // Create unique view name
+                            const uniqueId = Date.now().toString() + '_' + Math.floor(Math.random() * 10000);
+                            const transformedView = `${tableName}_bigint_${columnName.replace(/[^a-zA-Z0-9]/g, '_')}_${uniqueId}`;
+
+                            try {
+                                await conn.query(`
+                                    CREATE TEMPORARY VIEW ${transformedView} AS
+                                    SELECT 
+                                        *,
+                                        CAST(${columnName} AS DOUBLE) as ${columnName}_double
+                                    FROM ${tableName}
+                                    WHERE ${columnName} IS NOT NULL
+                                `);
+
+                                // Create plot with cast values
+                                plot = vg.plot(
+                                    vg.rectY(vg.from(transformedView, {filterBy: crossFilter}), {
+                                        x: vg.bin(`${columnName}_double`),
+                                        y: vg.count(),
+                                        inset: 1,
+                                        fill: BOIILERMAKER_GOLD,
+                                    }),
+                                    vg.marginLeft(60),
+                                    vg.marginBottom(55),
+                                    vg.intervalX({as: crossFilter}),
+                                    vg.xDomain(vg.Fixed),
+                                    vg.width(Math.min(windowWidth * width, 800)),
+                                    vg.height(Math.min(windowHeight * height, 300)),
+                                    vg.xLabel(column_pretty_names.get(columnName) || columnName),
+                                    vg.style({
+                                        "font-size": "0.8rem",
+                                        color: "#FFFFFF",
+                                        backgroundColor: "transparent",
+                                        ".vgplot-x-axis line, .vgplot-y-axis line": {
+                                            stroke: "#FFFFFF",
+                                        },
+                                        ".vgplot-x-axis text, .vgplot-y-axis text": {
+                                            fill: "#FFFFFF",
+                                        }
+                                    })
+                                );
+
+                                console.log(`DEBUG: Created histogram for BigInt column using cast to double`);
+                                return;
+                            } catch (bigintErr) {
+                                console.error(`DEBUG: Error creating BigInt histogram:`, bigintErr);
+                                // Fall through to regular approach
+                            }
+                        }
 
                         // If we have very small values, create transformed view
                         const needsScaling = needsSpecialScaling(columnName, range.min_val, range.max_val);
@@ -845,13 +901,13 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
                             try {
                                 await conn.query(`
-                  CREATE TEMPORARY VIEW ${transformedView} AS
-                  SELECT 
-                    *,
-                    ${columnName} * 1000000 as ${columnName}_scaled
-                  FROM ${tableName}
-                  WHERE ${columnName} IS NOT NULL
-                `);
+            CREATE TEMPORARY VIEW ${transformedView} AS
+            SELECT 
+                *,
+                ${columnName} * 1000000 as ${columnName}_scaled
+            FROM ${tableName}
+            WHERE ${columnName} IS NOT NULL
+        `);
 
                                 // Create plot with scaled values
                                 plot = vg.plot(
@@ -890,151 +946,157 @@ const VgPlot: React.FC<VgPlotProps> = ({
                         }
 
                         // Regular histogram creation (no scaling needed)
-                        plot = vg.plot(
-                            vg.rectY(vg.from(tableName, {filterBy: crossFilter}), {
-                                x: vg.bin(columnName),
-                                y: vg.count(),
-                                inset: 1,
-                                fill: BOIILERMAKER_GOLD,
-                            }),
-                            vg.marginLeft(60),
-                            vg.marginBottom(55),
-                            vg.intervalX({as: crossFilter}),
-                            vg.xDomain(vg.Fixed),
-                            vg.width(Math.min(windowWidth * width, 800)),
-                            vg.height(Math.min(windowHeight * height, 300)),
-                            vg.style({
-                                "font-size": "0.8rem",
-                                color: "#FFFFFF",
-                                backgroundColor: "transparent",
-                                ".vgplot-x-axis line, .vgplot-y-axis line": {
-                                    stroke: "#FFFFFF",
-                                },
-                                ".vgplot-x-axis text, .vgplot-y-axis text": {
-                                    fill: "#FFFFFF",
-                                }
-                            })
-                        );
+                        try {
+                            plot = vg.plot(
+                                vg.rectY(vg.from(tableName, {filterBy: crossFilter}), {
+                                    x: vg.bin(columnName),
+                                    y: vg.count(),
+                                    inset: 1,
+                                    fill: BOIILERMAKER_GOLD,
+                                }),
+                                vg.marginLeft(60),
+                                vg.marginBottom(55),
+                                vg.intervalX({as: crossFilter}),
+                                vg.xDomain(vg.Fixed),
+                                vg.width(Math.min(windowWidth * width, 800)),
+                                vg.height(Math.min(windowHeight * height, 300)),
+                                vg.style({
+                                    "font-size": "0.8rem",
+                                    color: "#FFFFFF",
+                                    backgroundColor: "transparent",
+                                    ".vgplot-x-axis line, .vgplot-y-axis line": {
+                                        stroke: "#FFFFFF",
+                                    },
+                                    ".vgplot-x-axis text, .vgplot-y-axis text": {
+                                        fill: "#FFFFFF",
+                                    }
+                                })
+                            );
 
-                        console.log(`DEBUG: Created regular numerical histogram`);
+                            console.log(`DEBUG: Created regular numerical histogram`);
+                        } catch (err) {
+                            console.error(`Error in numerical histogram setup: ${err}`);
+                            setError(`Could not create histogram: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                            return;
+                        }
                     } catch (err) {
-                        console.error(`Error creating numerical histogram: ${err}`);
+                        console.error(`Error in numerical histogram setup: ${err}`);
                         setError(`Could not create histogram: ${err instanceof Error ? err.message : 'Unknown error'}`);
                         return;
                     }
                     break;
 
                 case PlotType.CategoricalHistogram:
-                    try {
-                        const highlight = vg.Selection.intersect();
+                        try {
+                            const highlight = vg.Selection.intersect();
 
-                        plot = vg.plot(
-                            vg.rectY(vg.from(tableName, {filterBy: crossFilter}), {
-                                x: columnName,
-                                y: vg.count(),
-                                inset: 1,
-                                fill: BOIILERMAKER_GOLD,
-                            }),
-                            vg.marginLeft(60),
-                            vg.marginBottom(55),
-                            vg.toggleX({as: crossFilter}),
-                            vg.toggleX({as: highlight}),
-                            vg.highlight({by: highlight}),
-                            vg.xDomain(vg.Fixed),
-                            vg.width(Math.min(windowWidth * width, 800)),
-                            vg.height(Math.min(windowHeight * height, 300)),
-                            vg.style({
-                                "font-size": "0.9rem",
-                                color: "#FFFFFF",
-                                backgroundColor: "transparent",
-                                ".vgplot-x-axis line, .vgplot-y-axis line": {
-                                    stroke: "#FFFFFF",
-                                },
-                                ".vgplot-x-axis text, .vgplot-y-axis text": {
-                                    fill: "#FFFFFF",
-                                }
-                            })
-                        );
-                    } catch (err) {
-                        console.error(`Error creating categorical histogram: ${err}`);
-                        setError(`Could not create categorical plot: ${err instanceof Error ? err.message : 'Unknown error'}`);
-                        return;
+                            plot = vg.plot(
+                                vg.rectY(vg.from(tableName, {filterBy: crossFilter}), {
+                                    x: columnName,
+                                    y: vg.count(),
+                                    inset: 1,
+                                    fill: BOIILERMAKER_GOLD,
+                                }),
+                                vg.marginLeft(60),
+                                vg.marginBottom(55),
+                                vg.toggleX({as: crossFilter}),
+                                vg.toggleX({as: highlight}),
+                                vg.highlight({by: highlight}),
+                                vg.xDomain(vg.Fixed),
+                                vg.width(Math.min(windowWidth * width, 800)),
+                                vg.height(Math.min(windowHeight * height, 300)),
+                                vg.style({
+                                    "font-size": "0.9rem",
+                                    color: "#FFFFFF",
+                                    backgroundColor: "transparent",
+                                    ".vgplot-x-axis line, .vgplot-y-axis line": {
+                                        stroke: "#FFFFFF",
+                                    },
+                                    ".vgplot-x-axis text, .vgplot-y-axis text": {
+                                        fill: "#FFFFFF",
+                                    }
+                                })
+                            );
+                        } catch (err) {
+                            console.error(`Error creating categorical histogram: ${err}`);
+                            setError(`Could not create categorical plot: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                            return;
+                        }
+                        break;
                     }
-                    break;
+
+                    if (plotsRef.current && plot) {
+                        // Clear any previous content and add the new plot
+                        plotsRef.current.innerHTML = '';
+                        plotsRef.current.appendChild(plot);
+                        console.log(`DEBUG: Successfully mounted ${columnName} plot to DOM`);
+                    } else {
+                        console.error(`Plot or container reference is missing for ${columnName}`);
+                        setError("Could not render plot - container is missing");
+                    }
+            } catch (err) {
+                console.error("Error in setupDb:", err);
+                setError(`Failed to create visualization: ${err instanceof Error ? err.message : 'Unknown error'}`);
             }
+        }, [
+            dbLoading,
+            db,
+            dataLoading,
+            conn,
+            plotType,
+            tableName,
+            crossFilter,
+            xAxis,
+            columnName,
+            width,
+            windowWidth,
+            height,
+            windowHeight,
+        ]);
 
-            if (plotsRef.current && plot) {
-                // Clear any previous content and add the new plot
-                plotsRef.current.innerHTML = '';
-                plotsRef.current.appendChild(plot);
-                console.log(`DEBUG: Successfully mounted ${columnName} plot to DOM`);
-            } else {
-                console.error(`Plot or container reference is missing for ${columnName}`);
-                setError("Could not render plot - container is missing");
+        useEffect(() => {
+            if (domReady) {
+                console.log(`DEBUG: Running setupDb for ${columnName} now that DOM is ready`);
+                setupDb();
             }
-        } catch (err) {
-            console.error("Error in setupDb:", err);
-            setError(`Failed to create visualization: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        }
-    }, [
-        dbLoading,
-        db,
-        dataLoading,
-        conn,
-        plotType,
-        tableName,
-        crossFilter,
-        xAxis,
-        columnName,
-        width,
-        windowWidth,
-        height,
-        windowHeight,
-    ]);
+        }, [setupDb, domReady, columnName, retryCount, error]);
 
-    useEffect(() => {
-        if (domReady) {
-            console.log(`DEBUG: Running setupDb for ${columnName} now that DOM is ready`);
-            setupDb();
-        }
-    }, [setupDb, domReady, columnName, retryCount, error]);
-
-    if (error) {
-        return (
-            <div className="flex flex-col w-full text-white bg-zinc-900 p-4 rounded-lg min-h-40">
-                <h1 className="text-center text-xl text-red-400">{title}</h1>
-                <div className="flex items-center justify-center flex-1 p-4">
-                    <p className="text-red-400">
-                        {error.includes("No real data") ?
-                            "No real data available for this metric in the selected time window" :
-                            error}
-                    </p>
+        if (error) {
+            return (
+                <div className="flex flex-col w-full text-white bg-zinc-900 p-4 rounded-lg min-h-40">
+                    <h1 className="text-center text-xl text-red-400">{title}</h1>
+                    <div className="flex items-center justify-center flex-1 p-4">
+                        <p className="text-red-400">
+                            {error.includes("No real data") ?
+                                "No real data available for this metric in the selected time window" :
+                                error}
+                        </p>
+                    </div>
                 </div>
+            );
+        }
+
+        return (
+            <div className="flex flex-col w-full text-white">
+                {title && <h1 className="text-center text-xl mb-4">{title}</h1>}
+                <div
+                    className="overflow-visible w-full min-h-[400px] flex items-center justify-center"
+                    ref={plotsRef}
+                    style={{
+                        // Add inline styles to ensure plot is properly displayed
+                        minWidth: '100%',
+                        position: 'relative',
+                        zIndex: 1
+                    }}
+                />
+                {error && (
+                    <div className="mt-4 p-3 bg-red-900 rounded text-white">
+                        <p className="font-bold">Error:</p>
+                        <p>{error}</p>
+                    </div>
+                )}
             </div>
         );
-    }
+    };
 
-    return (
-        <div className="flex flex-col w-full text-white">
-            {title && <h1 className="text-center text-xl mb-4">{title}</h1>}
-            <div
-                className="overflow-visible w-full min-h-[400px] flex items-center justify-center"
-                ref={plotsRef}
-                style={{
-                    // Add inline styles to ensure plot is properly displayed
-                    minWidth: '100%',
-                    position: 'relative',
-                    zIndex: 1
-                }}
-            />
-            {error && (
-                <div className="mt-4 p-3 bg-red-900 rounded text-white">
-                    <p className="font-bold">Error:</p>
-                    <p>{error}</p>
-                </div>
-            )}
-        </div>
-    );
-};
-
-export default React.memo(VgPlot);
+    export default React.memo(VgPlot);

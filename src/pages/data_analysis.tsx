@@ -25,15 +25,15 @@ const LoadingAnimation = dynamic(() => import('@/components/LoadingAnimation'), 
 
 const COLUMN_NAMES = [
     { value: "time", label: "Time", numerical: true, linePlot: false },
-    { value: "nhosts", label: "Number of Hosts", numerical: true, linePlot: false },
-    { value: "ncores", label: "Number of Cores", numerical: true, linePlot: false },
-    { value: "account", label: "Account", numerical: false, linePlot: false },
-    { value: "queue", label: "Queue", numerical: false, linePlot: false },
+    { value: "nhosts", label: "Number of Hosts", numerical: false, linePlot: false },
+    { value: "ncores", label: "Number of Cores", numerical: false, linePlot: false },
+    { value: "account", label: "Account", numerical: true, linePlot: false },
+    { value: "queue", label: "Queue", numerical: true, linePlot: false },
     { value: "host", label: "Host", numerical: false, linePlot: false },
-    { value: "value_cpuuser", label: "CPU Usage", numerical: true, linePlot: true },
-    { value: "value_gpu", label: "GPU Usage", numerical: true, linePlot: true },
+    { value: "value_cpuuser", label: "CPU Usage", numerical: false, linePlot: true },
+    { value: "value_gpu", label: "GPU Usage", numerical: false, linePlot: true },
     { value: "value_memused", label: "Memory Used", numerical: true, linePlot: true },
-    { value: "value_memused_minus_diskcache", label: "Memory Used Minus Disk Cache", numerical: true, linePlot: true },
+    { value: "value_memused_minus_diskcache", label: "Memory Used Minus Disk Cache", numerical: false, linePlot: true },
     { value: "value_nfs", label: "NFS Usage", numerical: true, linePlot: true },
     { value: "value_block", label: "Block Usage", numerical: true, linePlot: true }
 ];
@@ -53,7 +53,6 @@ const DataAnalysisPage = () => {
         dataloading,
         setDataLoading,
         histogramData,
-        setHistogramData,
         crossFilter,
         setCrossFilter
     } = useDuckDB();
@@ -508,15 +507,15 @@ const DataAnalysisPage = () => {
                     try {
                         // First check if job_data already exists
                         const existingCheck = await conn.current.query(`
-              SELECT name FROM sqlite_master 
-              WHERE type='table' AND name='job_data'
-            `);
+                          SELECT name FROM sqlite_master 
+                          WHERE type='table' AND name='job_data'
+                        `);
 
                         if (existingCheck.toArray().length === 0) {
                             // Now check for job_data_small
                             const result = await conn.current.query(`
-                SELECT COUNT(*) as count FROM job_data_small
-              `);
+                                SELECT COUNT(*) as count FROM job_data_small
+                              `);
 
                             const count = result.toArray()[0].count;
                             console.log(`Found job_data_small table with ${count} rows`);
@@ -525,14 +524,14 @@ const DataAnalysisPage = () => {
                                 // Copy the data directly into job_data
                                 console.log("Creating job_data from job_data_small...");
                                 await conn.current.query(`
-                  CREATE TABLE job_data AS
-                  SELECT * FROM job_data_small
-                `);
+                                  CREATE TABLE job_data AS
+                                  SELECT * FROM job_data_small
+                                `);
 
                                 // Verify copy was successful
                                 const verifyResult = await conn.current.query(`
-                  SELECT COUNT(*) as count FROM job_data
-                `);
+                                  SELECT COUNT(*) as count FROM job_data
+                                `);
 
                                 const newCount = verifyResult.toArray()[0].count;
                                 console.log(`Successfully created job_data with ${newCount} rows`);
@@ -600,8 +599,8 @@ const DataAnalysisPage = () => {
                 // Verify the table exists after waiting
                 try {
                     const finalCheck = await conn.current.query(`
-    SELECT COUNT(*) as count FROM ${dataTableName}
-  `);
+                        SELECT COUNT(*) as count FROM ${dataTableName}
+                      `);
                     const finalCount = finalCheck.toArray()[0].count;
                     console.log(`Final verification: ${dataTableName} has ${finalCount} rows`);
                 } catch (err) {
@@ -611,24 +610,24 @@ const DataAnalysisPage = () => {
 
                 try {
                     const finalTableCheck = await conn.current.query(`
-        SELECT name FROM sqlite_master 
-        WHERE type='table' AND name='${dataTableName}'
-    `);
+                        SELECT name FROM sqlite_master 
+                        WHERE type='table' AND name='${dataTableName}'
+                    `);
 
                     if (finalTableCheck.toArray().length === 0) {
                         // Try to check if it's a view instead
                         const viewCheck = await conn.current.query(`
-            SELECT name FROM sqlite_master 
-            WHERE type='view' AND name='${dataTableName}'
-        `);
+                            SELECT name FROM sqlite_master 
+                            WHERE type='view' AND name='${dataTableName}'
+                        `);
 
                         if (viewCheck.toArray().length === 0) {
                             console.error(`Table/view "${dataTableName}" does not exist after data load!`);
                             // Fall back to job_data if it exists
                             const baseTableCheck = await conn.current.query(`
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='job_data'
-            `);
+                                SELECT name FROM sqlite_master 
+                                WHERE type='table' AND name='job_data'
+                            `);
 
                             if (baseTableCheck.toArray().length > 0) {
                                 console.log("Falling back to job_data table");
@@ -765,7 +764,7 @@ const DataAnalysisPage = () => {
                                 <h1 className="text-white text-lg">Choose columns to show as histograms:</h1>
                                 <MultiSelect
                                     options={COLUMN_NAMES.filter(item =>
-                                        availableColumns.includes(item.value)
+                                        item.numerical && availableColumns.includes(item.value)
                                     )}
                                     selected={histogramColumns.filter(col =>
                                         availableColumns.includes(col.value)
