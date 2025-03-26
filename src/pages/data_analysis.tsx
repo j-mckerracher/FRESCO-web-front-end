@@ -30,6 +30,7 @@ const COLUMN_NAMES = [
     { value: "account", label: "Account", numerical: true, linePlot: false },
     { value: "queue", label: "Queue", numerical: true, linePlot: false },
     { value: "host", label: "Host", numerical: false, linePlot: false },
+    { value: "exitcode", label: "Exit Code", numerical: false, linePlot: false },
     { value: "value_cpuuser", label: "CPU Usage", numerical: false, linePlot: true },
     { value: "value_gpu", label: "GPU Usage", numerical: false, linePlot: true },
     { value: "value_memused", label: "Memory Used", numerical: true, linePlot: true },
@@ -765,7 +766,7 @@ const DataAnalysisPage = () => {
                                 <h1 className="text-white text-lg">Choose columns to show as histograms:</h1>
                                 <MultiSelect
                                     options={COLUMN_NAMES.filter(item =>
-                                        item.numerical && availableColumns.includes(item.value)
+                                        (item.numerical || item.value === "exitcode") && availableColumns.includes(item.value)
                                     )}
                                     selected={histogramColumns.filter(col =>
                                         availableColumns.includes(col.value)
