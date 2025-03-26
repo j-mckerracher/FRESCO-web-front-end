@@ -31,6 +31,15 @@ export const column_pretty_names = new Map([
     ["value_block", "Block Usage"],
 ]);
 
+export const column_units = new Map([
+    ["value_cpuuser", "CPU %"],
+    ["value_gpu", "GPU %"],
+    ["value_memused", "GB"],
+    ["value_memused_minus_diskcache", "GB"],
+    ["value_nfs", "MB/s"],
+    ["value_block", "GB/s"],
+]);
+
 // New code
 const VgPlot: React.FC<VgPlotProps> = ({
                                            db,
@@ -529,7 +538,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
                                     vg.yScale('linear'),
                                     vg.yDomain([yMin - yBuffer, yMax + yBuffer]),
                                     vg.xLabel("Time"),
-                                    vg.yLabel(column_pretty_names.get(columnName) || columnName),
+                                    vg.yLabel(`${column_pretty_names.get(columnName) || columnName}${column_units.get(columnName) ? ` (${column_units.get(columnName)})` : ''}`),
                                     vg.style({
                                         color: "#FFFFFF",
                                         backgroundColor: "transparent",
@@ -730,7 +739,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
                                     vg.xScale('time'),
                                     vg.yScale('linear'),
                                     vg.xLabel("Time"),
-                                    vg.yLabel(column_pretty_names.get(columnName) || columnName),
+                                    vg.yLabel(`${column_pretty_names.get(columnName) || columnName}${column_units.get(columnName) ? ` (${column_units.get(columnName)})` : ''}`),
                                     vg.style({
                                         color: "#FFFFFF",
                                         backgroundColor: "transparent",
@@ -788,7 +797,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
                             vg.yScale('linear'),
                             vg.yDomain([yDomainMin, yDomainMax]), // Explicitly set y domain
                             vg.xLabel("Time"),
-                            vg.yLabel(column_pretty_names.get(columnName) || columnName),
+                            vg.yLabel(`${column_pretty_names.get(columnName) || columnName}${column_units.get(columnName) ? ` (${column_units.get(columnName)})` : ''}`),
                             vg.style({
                                 color: "#FFFFFF",
                                 backgroundColor: "transparent",
