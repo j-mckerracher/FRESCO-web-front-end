@@ -1,9 +1,5 @@
 {
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/node",
-      "config": { "nodeVersion": "20.x" }
-    }
-  ]
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "nodeVersion": "20.x"
 }
