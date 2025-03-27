@@ -87,7 +87,7 @@ const DataAnalysisPage = () => {
 
             // Extract column names from schema
             const columns = schemaCheck.schema.fields.map(f => f.name);
-            console.log("Available columns:", columns);
+            // console.log("Available columns:", columns);
 
             // Update state with available columns
             setAvailableColumns(columns);
@@ -456,6 +456,19 @@ const DataAnalysisPage = () => {
             histogramData
         });
 
+        // At the beginning of loadData function
+        console.log(`loadData: STARTED with params:`, {
+            useDemoData,
+            db: !!db,
+            loading,
+            dataloading,
+            memory: window.performance?.memory ? {
+                jsHeapSizeLimit: Math.round(window.performance.memory.jsHeapSizeLimit / 1048576) + "MB",
+                totalJSHeapSize: Math.round(window.performance.memory.totalJSHeapSize / 1048576) + "MB",
+                usedJSHeapSize: Math.round(window.performance.memory.usedJSHeapSize / 1048576) + "MB"
+            } : "Not available"
+        });
+
         if (!loading && db && dataloading) {
             try {
                 console.log('Starting data load');
@@ -523,28 +536,54 @@ const DataAnalysisPage = () => {
                             console.log(`Found job_data_small table with ${count} rows`);
 
                             if (count > 0) {
-                                // Copy the data directly into job_data
-                                console.log("Creating job_data from job_data_small...");
-                                await conn.current.query(`
-                                  CREATE TABLE job_data AS
-                                  SELECT * FROM job_data_small
-                                `);
+                                try {
+                                    // Try to copy the data with Unicode handling
+                                    console.log("Creating job_data from job_data_small with Unicode handling...");
 
-                                // Verify copy was successful
-                                const verifyResult = await conn.current.query(`
-                                  SELECT COUNT(*) as count FROM job_data
-                                `);
+                                    // First create an empty table with the same schema
+                                    await conn.current.query(`
+                                        CREATE TABLE job_data AS
+                                        SELECT * FROM job_data_small LIMIT 0
+                                    `);
 
-                                const newCount = verifyResult.toArray()[0].count;
-                                console.log(`Successfully created job_data with ${newCount} rows`);
+                                    // Then insert data with error handling for Unicode issues
+                                    try {
+                                        // Try the direct insert first
+                                        await conn.current.query(`
+                                            INSERT INTO job_data
+                                            SELECT * FROM job_data_small
+                                        `);
 
-                                if (newCount > 0) {
+                                        // Verify copy was successful
+                                        const verifyResult = await conn.current.query(`
+                                            SELECT COUNT(*) as count FROM job_data
+                                        `);
+
+                                        const newCount = verifyResult.toArray()[0].count;
+                                        console.log(`Successfully created job_data with ${newCount} rows`);
+
+                                        if (newCount > 0) {
+                                            dataLoaded = true;
+                                        } else {
+                                            throw new Error("job_data was created but has 0 rows");
+                                        }
+                                    } catch (unicodeError) {
+                                        console.warn("Unicode error detected, falling back to using job_data_small directly:", unicodeError);
+
+                                        // Drop the empty job_data table
+                                        await conn.current.query(`DROP TABLE IF EXISTS job_data`);
+
+                                        // Set dataTableName to job_data_small to use it directly
+                                        setDataTableName("job_data_small");
+                                        dataLoaded = true;
+                                        return;
+                                    }
+                                } catch (tableError) {
+                                    console.error("Error creating job_data table:", tableError);
+                                    // Fall back to using job_data_small directly
+                                    setDataTableName("job_data_small");
                                     dataLoaded = true;
-                                } else {
-                                    throw new Error("job_data was created but has 0 rows");
                                 }
-                            } else {
-                                console.log("job_data_small exists but is empty");
                             }
                         } else {
                             // job_data already exists, check if it has data
@@ -664,7 +703,26 @@ const DataAnalysisPage = () => {
 
     useEffect(() => {
         loadData(false);
-    }, [loadData]);
+
+        // Set a timeout to detect loading hangs
+        if (dataloading) {
+            console.log("Setting hang detection timeout");
+            const hangTimeout = setTimeout(() => {
+                console.error("LOADING HANG DETECTED: Loading process has taken more than 3 minutes");
+                console.log("Current state:", {
+                    db: !!db,
+                    loading,
+                    dataloading,
+                    histogramData,
+                    dataTableName,
+                    dataReady,
+                    conn: !!conn.current
+                });
+            }, 180000); // 3 minutes
+
+            return () => clearTimeout(hangTimeout);
+        }
+    }, [loadData, dataloading, db, loading, histogramData, dataTableName, dataReady]);
 
     // Log whenever loading state changes
     const shouldShowLoading = !db || !conn.current || dataloading;
@@ -688,7 +746,32 @@ const DataAnalysisPage = () => {
         const checkDataReady = async () => {
             if (db && conn.current && !dataloading && !loading) {
                 try {
-                    // Verify we can actually query the table/view
+                    // First check if the specified table exists
+                    const tableCheck = await conn.current.query(`
+                    SELECT name FROM sqlite_master 
+                    WHERE type='table' AND name='${dataTableName}'
+                `);
+
+                    if (tableCheck.toArray().length === 0) {
+                        // Table doesn't exist, try job_data_small as fallback
+                        console.warn(`Table ${dataTableName} not found, checking for job_data_small`);
+
+                        const smallTableCheck = await conn.current.query(`
+                        SELECT name FROM sqlite_master 
+                        WHERE type='table' AND name='job_data_small'
+                    `);
+
+                        if (smallTableCheck.toArray().length > 0) {
+                            console.log("Falling back to job_data_small");
+                            setDataTableName("job_data_small");
+                            setDataReady(true);
+                            return;
+                        } else {
+                            throw new Error("Neither main nor fallback table exists");
+                        }
+                    }
+
+                    // Verify we can actually query the table
                     const check = await conn.current.query(`
                     SELECT COUNT(*) as count FROM ${dataTableName} LIMIT 1
                 `);
@@ -696,9 +779,19 @@ const DataAnalysisPage = () => {
                     setDataReady(true);
                 } catch (err) {
                     console.error(`Data readiness check failed for ${dataTableName}:`, err);
-                    setDataReady(false);
-                    // Try to recover by falling back to job_data
-                    setDataTableName("job_data");
+                    // Try job_data_small as a final fallback
+                    try {
+                        const fallbackCheck = await conn.current.query(`
+                        SELECT COUNT(*) as count FROM job_data_small LIMIT 1
+                    `);
+                        console.log("Falling back to job_data_small after error");
+                        setDataTableName("job_data_small");
+                        setDataReady(true);
+                    } catch (fallbackErr) {
+                        console.error("Fallback also failed:", fallbackErr);
+                        setDataReady(false);
+                        setLoadError("Unable to access data tables. Try selecting a different time range.");
+                    }
                 }
             } else {
                 setDataReady(false);

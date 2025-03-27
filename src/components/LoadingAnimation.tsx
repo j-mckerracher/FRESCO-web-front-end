@@ -19,6 +19,10 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
     const managerRef = useRef<LoadingManager | null>(null);
 
     useEffect(() => {
+        console.log(`LoadingAnimation: Stage=${currentStage}, Progress=${progress}%`);
+    }, [currentStage, progress]);
+
+    useEffect(() => {
         const initThree = async () => {
             try {
                 const THREE = await import('three');

@@ -86,7 +86,7 @@ class TimeSeriesClient {
         const bufferName = `parquet_buffer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
         try {
-            console.log(`DEBUG: Downloading data from signed URL...`);
+            // console.log(`DEBUG: Downloading data from signed URL...`);
             const response = await fetch(url, {
                 method: 'GET',
                 mode: 'cors',
@@ -99,7 +99,7 @@ class TimeSeriesClient {
 
             const arrayBuffer = await response.arrayBuffer();
             const data = new Uint8Array(arrayBuffer);
-            console.log(`DEBUG: Downloaded ${data.byteLength} bytes`);
+            // console.log(`DEBUG: Downloaded ${data.byteLength} bytes`);
 
             // Register the buffer
             await this.db.registerFileBuffer(bufferName, data);
@@ -114,16 +114,6 @@ class TimeSeriesClient {
                 // Check rows in temp table
                 const tempRows = await conn.query(`SELECT COUNT(*) as count FROM ${tempTableName};`);
                 const tempCount = tempRows.toArray()[0].count;
-                console.log(`DEBUG: Temporary table contains ${tempCount} rows`);
-
-                const columnDebug = await conn.query(`SELECT * FROM ${tempTableName} LIMIT 1`);
-                console.log("DEBUG: Downloaded file columns:",
-                    columnDebug.schema.fields.map(f => f.name));
-
-                // Debug the target table structure before insert
-                // const targetDebug = await conn.query(`SELECT * FROM job_data_small LIMIT 0`);
-                // console.log("DEBUG: Target table columns:",
-                //     targetDebug.schema.fields.map(f => f.name));
 
                 // Modify the insert to explicitly name all columns
                 await conn.query(`

@@ -60,6 +60,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
     const [domReady, setDomReady] = useState(false);
     const [retryCount, setRetryCount] = useState(0);
     const plotsRef = useRef<HTMLDivElement | null>(null);
+    const [noData, setNoData] = useState(false);
 
     // Get a descriptive title for the plot
     let title = "";
@@ -315,16 +316,26 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
                         // Check if we have any data points for this column in the time range
                         const dataPointCheck = await conn.query(`
-                              SELECT COUNT(*) as count 
-                              FROM ${tableName}
-                              WHERE ${columnName} IS NOT NULL AND ${columnName} != 0 AND ${xAxis} IS NOT NULL
-                            `);
+                          SELECT COUNT(*) as count 
+                          FROM ${tableName}
+                          WHERE ${columnName} IS NOT NULL AND ${columnName} != 0 AND ${xAxis} IS NOT NULL
+                        `);
                         const dataPointCount = dataPointCheck.toArray()[0].count;
 
-                        // If no data points or all zero values, show a message instead of an empty plot
+// If no data points or all zero values, show a message instead of an empty plot
                         if (dataPointCount === 0) {
-                            console.log(`DEBUG: No data points for ${columnName}, showing error message instead of plot`);
-                            setError(`No non-zero data points available for ${columnName} in the selected time range`);
+                            console.log(`DEBUG: No data points for ${columnName}, showing no data message`);
+                            setNoData(true);
+
+                            // Create an empty plot container to show the "No data" message
+                            if (plotsRef.current) {
+                                plotsRef.current.innerHTML = '';
+                                const emptyPlot = document.createElement('div');
+                                emptyPlot.className = 'flex items-center justify-center w-full h-full min-h-[300px]';
+                                emptyPlot.innerHTML = '<div class="text-white text-xl">No data available</div>';
+                                plotsRef.current.appendChild(emptyPlot);
+                            }
+
                             return; // This return statement needs to stop all further execution
                         }
                         // Log the range of values to help diagnose scaling issues
@@ -1085,27 +1096,26 @@ const VgPlot: React.FC<VgPlotProps> = ({
             );
         }
 
-        return (
-            <div className="flex flex-col w-full text-white">
-                {title && <h1 className="text-center text-xl mb-4">{title}</h1>}
-                <div
-                    className="overflow-visible w-full min-h-[400px] flex items-center justify-center"
-                    ref={plotsRef}
-                    style={{
-                        // Add inline styles to ensure plot is properly displayed
-                        minWidth: '100%',
-                        position: 'relative',
-                        zIndex: 1
-                    }}
-                />
-                {error && (
-                    <div className="mt-4 p-3 bg-red-900 rounded text-white">
-                        <p className="font-bold">Error:</p>
-                        <p>{error}</p>
-                    </div>
-                )}
-            </div>
-        );
+    return (
+        <div className="flex flex-col w-full text-white">
+            <div
+                className="overflow-visible w-full min-h-[400px] flex items-center justify-center"
+                ref={plotsRef}
+                style={{
+                    // Add inline styles to ensure plot is properly displayed
+                    minWidth: '100%',
+                    position: 'relative',
+                    zIndex: 1
+                }}
+            />
+            {error && !noData && (
+                <div className="mt-4 p-3 bg-red-900 rounded text-white">
+                    <p className="font-bold">Error:</p>
+                    <p>{error}</p>
+                </div>
+            )}
+        </div>
+    );
     };
 
     export default React.memo(VgPlot);
