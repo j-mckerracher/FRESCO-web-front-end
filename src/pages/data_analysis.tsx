@@ -27,8 +27,8 @@ const COLUMN_NAMES = [
     { value: "time", label: "Time", numerical: true, linePlot: false },
     { value: "nhosts", label: "Number of Hosts", numerical: false, linePlot: false },
     { value: "ncores", label: "Number of Cores", numerical: false, linePlot: false },
-    { value: "account", label: "Account", numerical: true, linePlot: false },
-    { value: "queue", label: "Queue", numerical: true, linePlot: false },
+    { value: "account", label: "Account", numerical: false, linePlot: false },
+    { value: "queue", label: "Queue", numerical: false, linePlot: false },
     { value: "host", label: "Host", numerical: false, linePlot: false },
     { value: "exitcode", label: "Exit Code", numerical: false, linePlot: false },
     { value: "value_cpuuser", label: "CPU Usage", numerical: false, linePlot: true },
@@ -36,7 +36,7 @@ const COLUMN_NAMES = [
     { value: "value_memused", label: "Memory Used", numerical: true, linePlot: true },
     { value: "value_memused_minus_diskcache", label: "Memory Used Minus Disk Cache", numerical: false, linePlot: true },
     { value: "value_nfs", label: "NFS Usage", numerical: true, linePlot: true },
-    { value: "value_block", label: "Block Usage", numerical: true, linePlot: true }
+    { value: "value_block", label: "Block Usage", numerical: false, linePlot: true }
 ];
 
 const value_to_numerical = new Map(
