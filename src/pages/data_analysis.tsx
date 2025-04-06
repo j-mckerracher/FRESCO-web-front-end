@@ -25,18 +25,18 @@ const LoadingAnimation = dynamic(() => import('@/components/LoadingAnimation'), 
 
 const COLUMN_NAMES = [
     { value: "time", label: "Time", numerical: true, linePlot: false },
-    { value: "nhosts", label: "Number of Hosts", numerical: false, linePlot: false },
-    { value: "ncores", label: "Number of Cores", numerical: false, linePlot: false },
     { value: "account", label: "Account", numerical: false, linePlot: false },
     { value: "queue", label: "Queue", numerical: false, linePlot: false },
     { value: "host", label: "Host", numerical: false, linePlot: false },
     { value: "exitcode", label: "Exit Code", numerical: false, linePlot: false },
     { value: "value_cpuuser", label: "CPU Usage", numerical: false, linePlot: true },
     { value: "value_gpu", label: "GPU Usage", numerical: false, linePlot: true },
-    { value: "value_memused", label: "Memory Used", numerical: true, linePlot: true },
+    { value: "value_memused", label: "Memory Used", numerical: false, linePlot: true },
     { value: "value_memused_minus_diskcache", label: "Memory Used Minus Disk Cache", numerical: false, linePlot: true },
-    { value: "value_nfs", label: "NFS Usage", numerical: true, linePlot: true },
-    { value: "value_block", label: "Block Usage", numerical: false, linePlot: true }
+    { value: "value_nfs", label: "NFS Usage", numerical: false, linePlot: true },
+    { value: "value_block", label: "Block Usage", numerical: false, linePlot: true },
+    { value: "timelimit", label: "Time Limit", numerical: true, linePlot: false },
+    { value: "username", label: "Username", numerical: false, linePlot: false }
 ];
 
 const value_to_numerical = new Map(
@@ -859,10 +859,11 @@ const DataAnalysisPage = () => {
                                 <h1 className="text-white text-lg">Choose columns to show as histograms:</h1>
                                 <MultiSelect
                                     options={COLUMN_NAMES.filter(item =>
-                                        (item.numerical || item.value === "exitcode") && availableColumns.includes(item.value)
+                                        availableColumns.includes(item.value) && !item.linePlot
                                     )}
                                     selected={histogramColumns.filter(col =>
-                                        availableColumns.includes(col.value)
+                                        availableColumns.includes(col.value) &&
+                                        !COLUMN_NAMES.find(item => item.value === col.value)?.linePlot
                                     )}
                                     onChange={setHistogramColumns}
                                     className=""
