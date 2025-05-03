@@ -2,7 +2,7 @@ import Hero from "@/components/landing/Hero";
 import Header from "../components/Header";
 import Image from "next/image";
 import Footer from "@/components/Footer";
-// import MainSection from "../components/MainSection";
+import { Analytics } from '@vercel/analytics/next';// import MainSection from "../components/MainSection";
 // import Footer from "../components/Footer";
 
 const Home = () => {
@@ -29,6 +29,7 @@ const Home = () => {
             alt={""}
           />
           <div className="w-1/2 text-lg">
+            <Analytics />
             <p>
               The FRESCO project is engaged in the systematic collection,
               curation, and presentation of public failure data pertinent to
