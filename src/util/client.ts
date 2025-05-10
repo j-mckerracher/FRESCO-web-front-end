@@ -119,19 +119,21 @@ class TimeSeriesClient {
                 await conn.query(`
                   INSERT INTO job_data_small (
                     time, submit_time, start_time, end_time, timelimit, 
-                    nhosts, ncores, account, queue, host, jid, unit, 
+                    nhosts, ncores, account, queue, host, jid, 
                     jobname, exitcode, host_list, username, value_cpuuser, 
                     value_gpu, value_memused, value_memused_minus_diskcache, 
                     value_nfs, value_block
                   )
-                  SELECT
-                    time, submit_time, start_time, end_time, timelimit, 
-                    nhosts, ncores, account, queue, host, jid, unit, 
-                    jobname, exitcode, host_list, username, value_cpuuser, 
-                    value_gpu, value_memused, value_memused_minus_diskcache, 
-                    value_nfs, value_block
-                  FROM ${tempTableName};
+                  SELECT * FROM ${tempTableName};
                 `);
+
+                // SELECT
+                // time, submit_time, start_time, end_time, timelimit,
+                //     nhosts, ncores, account, queue, host, jid, unit,
+                //     jobname, exitcode, host_list, username, value_cpuuser,
+                //     value_gpu, value_memused, value_memused_minus_diskcache,
+                //     value_nfs, value_block
+                // FROM ${tempTableName};
 
                 if (tempCount > 0) {
                     // Insert data from temp table to job_data_small table
