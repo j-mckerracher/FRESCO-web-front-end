@@ -119,7 +119,7 @@ class TimeSeriesClient {
                 await conn.query(`
                   INSERT INTO job_data_small (
                     time, submit_time, start_time, end_time, timelimit, 
-                    nhosts, ncores, account, queue, host, jid, 
+                    nhosts, ncores, account, queue, host, jid, unit,
                     jobname, exitcode, host_list, username, value_cpuuser, 
                     value_gpu, value_memused, value_memused_minus_diskcache, 
                     value_nfs, value_block
