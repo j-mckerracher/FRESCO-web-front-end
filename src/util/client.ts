@@ -85,7 +85,7 @@ class TimeSeriesClient {
         const bufferName = `parquet_buffer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
         try {
-            console.log(`DEBUG: Downloading data from signed URL...`);
+            // console.log(`DEBUG: Downloading data from signed URL...`); // Keep this commented for cleaner logs unless essential
             const response = await fetch(url, {
                 method: 'GET',
                 mode: 'cors',
@@ -98,28 +98,21 @@ class TimeSeriesClient {
 
             const arrayBuffer = await response.arrayBuffer();
             const data = new Uint8Array(arrayBuffer);
-            console.log(`DEBUG: Downloaded ${data.byteLength} bytes from ${url}`);
+            // console.log(`DEBUG: Downloaded ${data.byteLength} bytes from ${url}`); // Keep this commented
 
-            // Register the buffer
             await this.db.registerFileBuffer(bufferName, data);
 
             try {
-                // Create and populate temporary table
                 await conn.query(`
                     CREATE TEMPORARY TABLE ${tempTableName} AS 
                     SELECT * FROM parquet_scan('${bufferName}');
                 `);
 
-                // Check rows in temp table
                 const tempRows = await conn.query(`SELECT COUNT(*) as count FROM ${tempTableName};`);
-                // Ensure count is treated as a number, default to 0 if null/undefined
                 const tempCount = (tempRows.toArray()[0]?.count as number) || 0;
 
                 if (tempCount > 0) {
-                    // Single, explicit INSERT statement.
-                    // This lists all 22 columns for job_data_small.
-                    // SELECT * from tempTableName assumes tempTableName (from parquet) also has these 22 columns
-                    // in the order that matches the target column list.
+                    // Make the SELECT statement explicit to match the 22 columns of job_data_small
                     await conn.query(`
                         INSERT INTO job_data_small (
                             time, submit_time, start_time, end_time, timelimit, 
@@ -128,25 +121,26 @@ class TimeSeriesClient {
                             value_gpu, value_memused, value_memused_minus_diskcache, 
                             value_nfs, value_block
                         )
-                        SELECT * FROM ${tempTableName};
+                        SELECT 
+                            time, submit_time, start_time, end_time, timelimit, 
+                            nhosts, ncores, account, queue, host, jid, unit,
+                            jobname, exitcode, host_list, username, value_cpuuser, 
+                            value_gpu, value_memused, value_memused_minus_diskcache, 
+                            value_nfs, value_block
+                        FROM ${tempTableName};
                     `);
-                    console.log(`DEBUG: Successfully inserted ${tempCount} rows from ${url} into job_data_small`);
-                    return true; // Data was inserted
+                    // console.log(`DEBUG: Successfully inserted ${tempCount} rows from ${url} into job_data_small`); // Keep commented
+                    return true;
                 } else {
                     console.warn(`DEBUG: Downloaded parquet file contains no rows: ${url}`);
-                    return false; // No data to insert
+                    return false;
                 }
             } finally {
-                // Clean up temporary table
                 await conn.query(`DROP TABLE IF EXISTS ${tempTableName};`);
-                // Note: DuckDB-wasm doesn't have a direct method to unregister file buffers.
-                // The buffer will eventually be garbage collected when no longer referenced.
-                // If this.db.unregisterFileBuffer existed, it would be called here:
-                // await this.db.unregisterFileBuffer(bufferName);
             }
         } catch (error) {
             console.error(`Error processing file ${url}:`, error);
-            return false; // Error occurred
+            return false;
         }
     }
 
