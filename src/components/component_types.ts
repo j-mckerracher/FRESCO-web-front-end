@@ -18,6 +18,7 @@ export interface VgPlotProps {
   plotType: PlotType;
   width: number;
   height: number;
+  topCategories?: number;
 }
 
 const FILL_COLOR = "#CFB991";

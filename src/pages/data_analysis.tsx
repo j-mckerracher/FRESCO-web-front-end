@@ -907,6 +907,7 @@ const DataAnalysisPage = () => {
                                     columnName={col.value}
                                     width={0.75}
                                     height={0.4}
+                                    topCategories={15} // Show top 15 categories, adjust as needed
                                     plotType={
                                         value_to_numerical.get(col.value)
                                             ? PlotType.NumericalHistogram

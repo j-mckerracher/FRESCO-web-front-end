@@ -1,8 +1,8 @@
 "use client";
 import * as vg from "@uwdata/vgplot";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { VgPlotProps } from "@/components/component_types";
-import { BOIILERMAKER_GOLD, PlotType } from "./component_types";
+import React, {useCallback, useEffect, useRef, useState} from "react";
+import {VgPlotProps} from "@/components/component_types";
+import {BOIILERMAKER_GOLD, PlotType} from "./component_types";
 
 // ============= Constants & Configuration =============
 
@@ -69,7 +69,7 @@ const COLUMN_CONFIGS = {
 
 const getPlotTitle = (plotType: PlotType, columnName: string, xAxis: string = ""): string => {
     const prettyColumn = column_pretty_names.get(columnName) || columnName;
-    
+
     switch (plotType) {
         case PlotType.CategoricalHistogram:
             return `Frequency of ${prettyColumn}`;
@@ -155,7 +155,7 @@ async function validateTableAndColumn(
         SELECT name FROM sqlite_master 
         WHERE type='table' AND name='${tableName}'
     `);
-    
+
     if (tableCheck.toArray().length === 0) {
         throw new Error(`Table "${tableName}" not found`);
     }
@@ -166,10 +166,10 @@ async function validateTableAndColumn(
 
     // Check main column
     if (!columns.includes(columnName)) {
-        const matchingColumn = columns.find((c: string) => 
+        const matchingColumn = columns.find((c: string) =>
             c.toLowerCase() === columnName.toLowerCase()
         );
-        
+
         if (!matchingColumn) {
             throw new Error(`Column "${columnName}" not found in table`);
         }
@@ -195,7 +195,7 @@ async function getDataStats(
         FROM ${tableName}
         WHERE ${columnName} IS NOT NULL
     `);
-    
+
     return result.toArray()[0];
 }
 
@@ -205,16 +205,16 @@ async function checkDataAvailability(
     columnName: string,
     xAxis?: string
 ): Promise<number> {
-    const whereClause = xAxis 
+    const whereClause = xAxis
         ? `${columnName} IS NOT NULL AND ${columnName} != 0 AND ${xAxis} IS NOT NULL`
         : `${columnName} IS NOT NULL`;
-    
+
     const result = await conn.query(`
         SELECT COUNT(*) as count 
         FROM ${tableName}
         WHERE ${whereClause}
     `);
-    
+
     return result.toArray()[0].count;
 }
 
@@ -352,18 +352,19 @@ function createPlotConfiguration(
 // ============= Main Component =============
 
 const VgPlot: React.FC<VgPlotProps> = ({
-    db,
-    conn,
-    crossFilter,
-    dbLoading,
-    dataLoading,
-    tableName,
-    xAxis = "",
-    columnName,
-    plotType,
-    width,
-    height,
-}) => {
+                                           db,
+                                           conn,
+                                           crossFilter,
+                                           dbLoading,
+                                           dataLoading,
+                                           tableName,
+                                           xAxis = "",
+                                           columnName,
+                                           plotType,
+                                           width,
+                                           height,
+                                           topCategories,
+                                       }) => {
     const [windowWidth, setWindowWidth] = useState(0);
     const [windowHeight, setWindowHeight] = useState(0);
     const [error, setError] = useState<string | null>(null);
@@ -380,7 +381,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
             setWindowWidth(window.innerWidth);
             setWindowHeight(window.innerHeight);
         };
-        
+
         updateDimensions();
         window.addEventListener("resize", updateDimensions);
         return () => window.removeEventListener("resize", updateDimensions);
@@ -415,9 +416,9 @@ const VgPlot: React.FC<VgPlotProps> = ({
         let plot: any;
 
         // Handle special column configurations
-        if (config?.usePercentiles && 
+        if (config?.usePercentiles &&
             Math.abs(stats.min_val) > config.thresholdValue) {
-            
+
             viewName = generateViewName(tableName, columnName, "robust_");
             await createPercentileBasedView(
                 conn,
@@ -430,7 +431,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
             );
 
             const robustStats = await getDataStats(conn, viewName, "avg_value");
-            
+
             plot = vg.plot(
                 ...createLinePlotElements(viewName, true),
                 ...createPlotConfiguration(
@@ -447,7 +448,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
             // Standard aggregated view
             viewName = generateViewName(tableName, columnName, "agg_");
             await createStandardAggregatedView(conn, viewName, tableName, columnName, xAxis);
-            
+
             plot = vg.plot(
                 ...createLinePlotElements(viewName, config?.enhancedVisualization),
                 ...createPlotConfiguration(
@@ -550,33 +551,115 @@ const VgPlot: React.FC<VgPlotProps> = ({
         return plot;
     }, [conn, tableName, columnName, crossFilter, windowWidth, windowHeight, width, height]);
 
-    // Create categorical histogram
-    const createCategoricalHistogram = useCallback(() => {
+    async function createTopNCategoriesView(
+        conn: any,
+        tableName: string,
+        columnName: string,
+        topN: number = 10
+    ): Promise<string> {
+        const viewName = generateViewName(tableName, columnName, "topn_");
+
+        try {
+            await conn.query(`
+      CREATE TEMPORARY VIEW ${viewName} AS
+      WITH category_counts AS (
+        SELECT 
+          ${columnName},
+          COUNT(*) as count
+        FROM ${tableName}
+        WHERE ${columnName} IS NOT NULL
+        GROUP BY ${columnName}
+        ORDER BY count DESC
+      ),
+      ranked AS (
+        SELECT
+          ${columnName},
+          count,
+          ROW_NUMBER() OVER (ORDER BY count DESC) as rank
+        FROM category_counts
+      )
+      SELECT
+        CASE
+          WHEN rank <= ${topN} THEN ${columnName}
+          ELSE 'Others'
+        END as category,
+        SUM(count) as count
+      FROM ranked
+      GROUP BY 
+        CASE
+          WHEN rank <= ${topN} THEN ${columnName}
+          ELSE 'Others'
+        END
+      ORDER BY 
+        CASE WHEN category = 'Others' THEN 1 ELSE 0 END,
+        count DESC
+    `);
+
+            return viewName;
+        } catch (err) {
+            console.error("Error creating top N categories view:", err);
+            throw err;
+        }
+    }
+
+
+// Create categorical histogram
+    const createCategoricalHistogram = useCallback(async () => {
         const highlight = vg.Selection.intersect();
-        
-        return vg.plot(
-            vg.rectY(vg.from(tableName, {filterBy: crossFilter}), {
-                x: columnName,
-                y: vg.count(),
-                inset: 1,
-                fill: BOIILERMAKER_GOLD,
-            }),
-            vg.marginLeft(60),
-            vg.marginBottom(55),
-            vg.toggleX({as: crossFilter}),
-            vg.toggleX({as: highlight}),
-            vg.highlight({by: highlight}),
-            vg.xDomain(vg.Fixed),
-            vg.width(Math.min(windowWidth * width, 800)),
-            vg.height(Math.min(windowHeight * height, 300)),
-            vg.style({
-                ...getHistogramStyle(),
-                "font-size": "0.9rem"
-            })
-        );
-    }, [tableName, columnName, crossFilter, windowWidth, windowHeight, width, height]);
+        const topN = topCategories || 10;
+
+        try {
+            // Create view with top N categories - make sure to await this
+            const viewName = await createTopNCategoriesView(
+                conn,
+                tableName,
+                columnName,
+                topN
+            );
+
+            // Create a plot variable instead of returning directly
+            const plot = vg.plot(
+                vg.rectY(vg.from(viewName), {
+                    x: "category",
+                    y: "count",
+                    inset: 1,
+                    fill: BOIILERMAKER_GOLD,
+                }),
+                vg.marginLeft(60),
+                vg.marginBottom(150), // Further increased for vertical labels
+                vg.width(Math.min(windowWidth * width, 800)),
+                vg.height(Math.min(windowHeight * height, 300)),
+                vg.xLabel(column_pretty_names.get(columnName) || columnName),
+                vg.yLabel("Count"),
+                vg.style({
+                    ...getHistogramStyle(),
+                    "font-size": "0.9rem",
+                    // Rotate x-axis labels to vertical and adjust positioning
+                    ".vgplot-x-axis text": {
+                        transform: "rotate(-90deg)",
+                        textAnchor: "end",
+                        dominantBaseline: "middle",
+                        fontSize: "0.75rem", // Smaller font for x-axis labels
+                        dx: "-0.5em", // Shift labels left slightly
+                        dy: "0.3em"   // Shift labels down slightly
+                    },
+                    // Ensure x-axis label (title) is positioned correctly
+                    ".vgplot-x-axis .vgplot-label": {
+                        transform: "none",
+                        fontSize: "0.9rem"
+                    }
+                })
+            );
+
+            return plot;
+        } catch (err) {
+            console.error("Error creating categorical histogram:", err);
+            throw err;
+        }
+    }, [conn, tableName, columnName, topCategories, windowWidth, windowHeight, width, height]);
 
     // Main setup function
+// Main setup function
     const setupDb = useCallback(async () => {
         if (dbLoading || !db || dataLoading || !conn) {
             return;
@@ -611,7 +694,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
             // Set up the coordinator
             try {
                 vg.coordinator().databaseConnector(
-                    vg.wasmConnector({ duckdb: db, connection: conn })
+                    vg.wasmConnector({duckdb: db, connection: conn})
                 );
             } catch (err) {
                 // Coordinator might already be set up
@@ -628,7 +711,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
                     plot = await createNumericalHistogram();
                     break;
                 case PlotType.CategoricalHistogram:
-                    plot = createCategoricalHistogram();
+                    plot = await createCategoricalHistogram();  // Added await here
                     break;
             }
 
