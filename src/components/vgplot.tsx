@@ -603,13 +603,16 @@ const VgPlot: React.FC<VgPlotProps> = ({
     }
 
 
-// Create categorical histogram
+    // Create categorical histogram
     const createCategoricalHistogram = useCallback(async () => {
         const highlight = vg.Selection.intersect();
-        const topN = topCategories || 10;
+
+        const availableWidth = Math.min(windowWidth * width, 800);
+        const pixelsPerCategory = 100;
+        const maxCategories = Math.max(5, Math.floor(availableWidth / pixelsPerCategory));
+        const topN = topCategories ? Math.min(topCategories, maxCategories) : maxCategories;
 
         try {
-            // Create view with top N categories - make sure to await this
             const viewName = await createTopNCategoriesView(
                 conn,
                 tableName,
@@ -617,36 +620,36 @@ const VgPlot: React.FC<VgPlotProps> = ({
                 topN
             );
 
-            // Create a plot variable instead of returning directly
             const plot = vg.plot(
                 vg.rectY(vg.from(viewName), {
                     x: "category",
                     y: "count",
-                    inset: 1,
+                    inset: 4,
                     fill: BOIILERMAKER_GOLD,
+                    tooltip: true
                 }),
                 vg.marginLeft(60),
-                vg.marginBottom(150), // Further increased for vertical labels
-                vg.width(Math.min(windowWidth * width, 800)),
+                vg.marginBottom(180),
+                vg.marginRight(30),
+                vg.width(availableWidth),
                 vg.height(Math.min(windowHeight * height, 300)),
+                // Simplified xAxis configuration to avoid the anchor issue
+                vg.xAxis("bottom", {
+                    tickRotate: -45,
+                    labelPadding: 15,
+                    tickSpacing: 30
+                }),
                 vg.xLabel(column_pretty_names.get(columnName) || columnName),
                 vg.yLabel("Count"),
                 vg.style({
-                    ...getHistogramStyle(),
-                    "font-size": "0.9rem",
-                    // Rotate x-axis labels to vertical and adjust positioning
-                    ".vgplot-x-axis text": {
-                        transform: "rotate(-90deg)",
-                        textAnchor: "end",
-                        dominantBaseline: "middle",
-                        fontSize: "0.75rem", // Smaller font for x-axis labels
-                        dx: "-0.5em", // Shift labels left slightly
-                        dy: "0.3em"   // Shift labels down slightly
-                    },
-                    // Ensure x-axis label (title) is positioned correctly
-                    ".vgplot-x-axis .vgplot-label": {
-                        transform: "none",
-                        fontSize: "0.9rem"
+                    ...getBaseStyle(),
+                    "svg g[aria-label='x-axis tick label'] text": {
+                        transform: "rotate(-45deg) !important",
+                        transformOrigin: "10px 10px !important",
+                        textAnchor: "end !important",
+                        fontSize: "0.75rem !important",
+                        fontWeight: "normal !important",
+                        letterSpacing: "0.01em !important"
                     }
                 })
             );
