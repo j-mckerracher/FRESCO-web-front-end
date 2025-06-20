@@ -25,12 +25,6 @@ export default function Team() {
       webpage: "https://web.ics.purdue.edu/~cxsong/purdue/Welcome.html",
     },
     {
-      name: "Rajesh Kalyanam",
-      image: "/assets/headshots/rajeshkalyanam.png",
-      email: "rkalyana@purdue.edu",
-      webpage: "https://www.rcac.purdue.edu/about/staff/rkalyana",
-    },
-    {
       name: "Amiya Maji",
       image: "/assets/headshots/amiyamaji.jpg",
       email: "amaji@purdue.edu",
