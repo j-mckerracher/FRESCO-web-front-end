@@ -629,7 +629,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
                     tooltip: true
                 }),
                 vg.marginLeft(60),
-                vg.marginBottom(180),
+                vg.marginBottom(180),   
                 vg.marginRight(30),
                 vg.width(availableWidth),
                 vg.height(Math.min(windowHeight * height, 300)),

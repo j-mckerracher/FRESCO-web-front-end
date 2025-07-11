@@ -1,35 +1,44 @@
-import {AsyncDuckDB} from "duckdb-wasm-kit";
-import {AsyncDuckDBConnection} from "@duckdb/duckdb-wasm";
+/**
+ * Time series data client for FRESCO
+ * 
+ * This module provides functionality to query data from the FRESCO API
+ * and load it into DuckDB for analysis.
+ */
 
-interface QueryResult {
-    transferId?: string;
-    body: string;
-    metadata?: {
-        total_partitions: number;
-        estimated_size: number;
-        chunk_count: number;
-    };
-    chunks?: Array<{ url: string }>;
-}
+import { AsyncDuckDB } from "duckdb-wasm-kit";
+import { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
+import { QueryResult, QueryPayload, DataLoadingProgress } from "../types";
 
-interface QueryPayload {
-    query: string;
-    clientId: string;
-    rowLimit: number;
-}
+// Re-export types for backward compatibility
+export type { QueryResult, QueryPayload };
 
+/**
+ * Client for querying time series data from the FRESCO API
+ * and loading it into DuckDB for analysis.
+ */
 class TimeSeriesClient {
     private baseUrl: string;
     private maxWorkers: number;
     private db: AsyncDuckDB;
     private conn: AsyncDuckDBConnection | null = null;
 
+    /**
+     * Create a new TimeSeriesClient instance
+     * 
+     * @param maxWorkers - Maximum number of concurrent workers for downloading
+     * @param duckDBInstance - DuckDB database instance to use
+     */
     public constructor(maxWorkers: number, duckDBInstance: AsyncDuckDB) {
         this.baseUrl = "https://dusrle1grb.execute-api.us-east-1.amazonaws.com/prod";
         this.maxWorkers = maxWorkers;
         this.db = duckDBInstance;
     }
 
+    /**
+     * Ensure a database connection is established
+     * 
+     * @returns Promise resolving to the database connection
+     */
     private async ensureConnection(): Promise<AsyncDuckDBConnection> {
         if (!this.conn) {
             this.conn = await this.db.connect();
@@ -39,6 +48,9 @@ class TimeSeriesClient {
         return this.conn;
     }
 
+    /**
+     * Ensure the required database table exists
+     */
     private async ensureTable(): Promise<void> {
         const conn = await this.ensureConnection();
 
@@ -79,6 +91,12 @@ class TimeSeriesClient {
         }
     }
 
+    /**
+     * Download a single parquet file from a signed URL and load it into DuckDB
+     * 
+     * @param url - Signed URL to download the parquet file from
+     * @returns Promise resolving to true if successful, false otherwise
+     */
     async downloadFile(url: string): Promise<boolean> {
         const conn = await this.ensureConnection();
         const tempTableName = `temp_table_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -144,6 +162,11 @@ class TimeSeriesClient {
         }
     }
 
+    /**
+     * Download multiple parquet files concurrently with retry logic
+     * 
+     * @param urls - Array of signed URLs to download
+     */
     async downloadContent(urls: string[]): Promise<void> {
         console.log(`Processing ${urls.length} URLs`);
         const maxRetries = 3;
@@ -190,6 +213,13 @@ class TimeSeriesClient {
         }
     }
 
+    /**
+     * Query data from the FRESCO API
+     * 
+     * @param query - SQL query to execute
+     * @param rowLimit - Maximum number of rows to return
+     * @returns Promise resolving to the query result
+     */
     async queryData(query: string, rowLimit: number): Promise<QueryResult> {
         // Log the exact query received by this method
         console.log(`DEBUG: TimeSeriesClient.queryData sending query: ${query}`);
@@ -227,7 +257,15 @@ class TimeSeriesClient {
     }
 }
 
-// For src/util/client.ts - Complete fixed startSingleQuery function
+/**
+ * Execute a single query against the FRESCO API and load results into DuckDB
+ * 
+ * @param sqlQuery - SQL query to execute
+ * @param db - DuckDB database instance
+ * @param tableName - Name of the destination table
+ * @param rowLimit - Maximum number of rows to return
+ * @param onProgress - Progress callback function
+ */
 async function startSingleQuery(
     sqlQuery: string,
     db: AsyncDuckDB,
@@ -342,7 +380,13 @@ async function startSingleQuery(
 }
 
 
-function extractTimeBounds(query: string) {
+/**
+ * Extract time bounds from a SQL query string
+ * 
+ * @param query - SQL query containing time bounds
+ * @returns Object containing start and end timestamps
+ */
+function extractTimeBounds(query: string): { start: string; end: string } {
     const timePattern = /time\s+BETWEEN\s+'([^']+)'\s+AND\s+'([^']+)'/i;
     const match = query.match(timePattern);
 

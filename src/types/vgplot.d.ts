@@ -1,94 +1,261 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-declare module '@uwdata/vgplot'{
+/**
+ * TypeScript declarations for @uwdata/vgplot
+ * 
+ * This file provides proper TypeScript definitions for the VGPlot library
+ * used in FRESCO for data visualization, replacing all 'any' types with
+ * proper type definitions.
+ */
 
-  const Selection;
+import { AsyncDuckDB, AsyncDuckDBConnection } from '@duckdb/duckdb-wasm';
 
-  export function  coordinator() {
-    throw new Error("Function not implemented.");
+declare module '@uwdata/vgplot' {
+  
+  // ===================
+  // Core Types
+  // ===================
+
+  /**
+   * VGPlot chart element that can be rendered in the DOM
+   */
+  export interface VGPlotElement {
+    node: HTMLElement;
+    update: (data: unknown) => void;
+    destroy: () => void;
   }
 
-  export function wasmConnector(arg0: { duckdb: import("duckdb-wasm-kit").AsyncDuckDB; connection: import("@duckdb/duckdb-wasm").AsyncDuckDBConnection; }): any {
-    throw new Error("Function not implemented.");
+  /**
+   * Data source configuration for VGPlot
+   */
+  export interface DataSource {
+    name: string;
+    data?: unknown[];
+    sql?: string;
+    [key: string]: unknown;
   }
 
-  export function plot(...arg0: any) {
-    throw new Error("Function not implemented.");
+  /**
+   * Chart configuration options
+   */
+  export interface ChartConfig {
+    x?: string;
+    y?: string;
+    fill?: string;
+    stroke?: string;
+    inset?: number;
+    width?: number;
+    height?: number;
+    marginLeft?: number;
+    marginRight?: number;
+    marginTop?: number;
+    marginBottom?: number;
+    [key: string]: unknown;
   }
 
-  export function rectY(arg0: any, arg1: { x: any; y: any; inset: number; fill: string; }): any {
-    throw new Error("Function not implemented.");
+  /**
+   * Domain specification for chart axes
+   */
+  export type Domain = number[] | string[] | Date[];
+
+  /**
+   * Filter specification for data transformations
+   */
+  export interface FilterSpec {
+    as?: string;
+    [key: string]: unknown;
   }
 
-  export function from(arg0: string, arg1?: object): any {
-    throw new Error("Function not implemented.");
+  /**
+   * Highlight specification for interactive charts
+   */
+  export interface HighlightSpec {
+    by: string | string[];
+    [key: string]: unknown;
   }
 
-  export function bin(arg0: string) {
-    throw new Error("Function not implemented.");
+  /**
+   * Style specification for chart appearance
+   */
+  export interface StyleSpec {
+    'font-size'?: string;
+    color?: string;
+    [key: string]: string | number | undefined;
   }
 
-  export function count() {
-    throw new Error("Function not implemented.");
+  /**
+   * Menu configuration for interactive controls
+   */
+  export interface MenuConfig {
+    label?: string;
+    options?: string[] | { label: string; value: unknown }[];
+    [key: string]: unknown;
   }
 
-  export function marginLeft(arg0: number): any {
-    throw new Error("Function not implemented.");
-  }
+  // ===================
+  // Core Functions
+  // ===================
 
-  export function intervalX(arg0: { as: any; }): any {
-    throw new Error("Function not implemented.");
-  }
+  /**
+   * Create a coordinator for managing chart interactions
+   */
+  export function coordinator(): unknown;
 
-  export function xDomain(Fixed: any): any {
-    throw new Error("Function not implemented.");
-  }
+  /**
+   * Create a WebAssembly connector for DuckDB integration
+   */
+  export function wasmConnector(config: { 
+    duckdb: AsyncDuckDB; 
+    connection: AsyncDuckDBConnection; 
+  }): unknown;
 
-  export function Fixed(Fixed: any): any {
-    throw new Error("Function not implemented.");
-  }
+  /**
+   * Create a plot with the given configuration
+   */
+  export function plot(...elements: VGPlotElement[]): VGPlotElement;
 
-  export function width(arg0: number): any {
-    throw new Error("Function not implemented.");
-  }
+  /**
+   * Create a data source from a table name or SQL query
+   */
+  export function from(source: string, options?: Record<string, unknown>): DataSource;
 
-  export function height(arg0: number): any {
-    throw new Error("Function not implemented.");
-  }
+  // ===================
+  // Chart Types
+  // ===================
 
-  export function toggleX(arg0: { as: unknown; }): any {
-    throw new Error("Function not implemented.");
-  }
+  /**
+   * Create a rectangular bar chart (histogram)
+   */
+  export function rectY(
+    data: DataSource | unknown[], 
+    config: ChartConfig & { x: string; y: string; fill?: string }
+  ): VGPlotElement;
 
-  export function highlight(arg0: { by: any; }): any {
-    throw new Error("Function not implemented.");
-  }
+  /**
+   * Create a line chart
+   */
+  export function lineY(
+    data: DataSource | unknown[], 
+    config: ChartConfig & { x: string; y: string; stroke?: string }
+  ): VGPlotElement;
 
-  export function lineY(arg0: any, arg1: { x: string; y: string; inset: number; stroke: string; }): any {
-    throw new Error("Function not implemented.");
-  }
+  /**
+   * Create a dot plot (scatter plot)
+   */
+  export function dotY(
+    data: DataSource | unknown[], 
+    config: ChartConfig & { x: string; y: string; stroke?: string }
+  ): VGPlotElement;
 
-  export function panZoomX(filter: any): any {
-    throw new Error("Function not implemented.");
-  }
+  // ===================
+  // Data Transformations
+  // ===================
 
-  export function yDomain(arg0: number[]): any {
-    throw new Error("Function not implemented.");
-  }
+  /**
+   * Create bins for histogram data
+   */
+  export function bin(column: string): unknown;
 
-  export function style(arg0: { "font-size": string; }): any {
-    throw new Error("Function not implemented.");
-  }
+  /**
+   * Count aggregation function
+   */
+  export function count(): unknown;
 
-  export function aspectRatio(arg0: number): any {
-    throw new Error("Function not implemented.");
-  }
+  // ===================
+  // Layout Functions
+  // ===================
 
-    export function menu(arg0: any) {
-        throw new Error("Function not implemented.");
-    }
+  /**
+   * Set the width of the chart
+   */
+  export function width(pixels: number): VGPlotElement;
 
-  export function dotY(arg0: any, arg1: { x: string; y: string; inset: number; stroke: string; }): any {
-    throw new Error("Function not implemented.");
-  }
+  /**
+   * Set the height of the chart
+   */
+  export function height(pixels: number): VGPlotElement;
+
+  /**
+   * Set the left margin of the chart
+   */
+  export function marginLeft(pixels: number): VGPlotElement;
+
+  /**
+   * Set the aspect ratio of the chart
+   */
+  export function aspectRatio(ratio: number): VGPlotElement;
+
+  // ===================
+  // Domain Functions
+  // ===================
+
+  /**
+   * Set the X-axis domain
+   */
+  export function xDomain(domain: Domain): VGPlotElement;
+
+  /**
+   * Set the Y-axis domain
+   */
+  export function yDomain(domain: Domain): VGPlotElement;
+
+  /**
+   * Create a fixed domain specification
+   */
+  export function Fixed(domain: Domain): Domain;
+
+  // ===================
+  // Interaction Functions
+  // ===================
+
+  /**
+   * Add X-axis interval selection
+   */
+  export function intervalX(config: FilterSpec): VGPlotElement;
+
+  /**
+   * Add X-axis toggle selection
+   */
+  export function toggleX(config: FilterSpec): VGPlotElement;
+
+  /**
+   * Add highlighting interaction
+   */
+  export function highlight(config: HighlightSpec): VGPlotElement;
+
+  /**
+   * Add pan and zoom interaction for X-axis
+   */
+  export function panZoomX(filter: FilterSpec): VGPlotElement;
+
+  // ===================
+  // Style Functions
+  // ===================
+
+  /**
+   * Apply custom styles to the chart
+   */
+  export function style(styles: StyleSpec): VGPlotElement;
+
+  // ===================
+  // UI Components
+  // ===================
+
+  /**
+   * Create an interactive menu control
+   */
+  export function menu(config: MenuConfig): VGPlotElement;
+
+  // ===================
+  // Selection Object
+  // ===================
+
+  /**
+   * Selection object for managing chart selections
+   */
+  export const Selection: {
+    single: (name: string) => unknown;
+    crossfilter: (name: string) => unknown;
+    intersect: (name: string) => unknown;
+    union: (name: string) => unknown;
+    [key: string]: unknown;
+  };
 }
