@@ -511,7 +511,7 @@ const DataAnalysisPage = () => {
                 }
 
                 // If using demo data or no query exists, create demo data directly
-                let shouldCreateDemoData = useDemoData;
+                const shouldCreateDemoData = useDemoData;
                 let dataLoaded = false;
 
                 if (!shouldCreateDemoData) {
