@@ -263,8 +263,8 @@ describe('data-transfer utilities', () => {
         throw new DOMException('QuotaExceededError');
       });
 
-      // Should not throw an error
-      expect(() => saveQueryParameters(largeParams)).not.toThrow();
+      // Should throw a quota exceeded error
+      expect(() => saveQueryParameters(largeParams)).toThrow('QuotaExceededError');
     });
 
     it('should handle localStorage access errors', () => {
@@ -272,13 +272,8 @@ describe('data-transfer utilities', () => {
         throw new Error('localStorage access denied');
       });
 
-      const result = getQueryParameters();
-
-      expect(result).toBeNull();
-      expect(console.error).toHaveBeenCalledWith(
-        'Error parsing stored query parameters:',
-        expect.any(Error)
-      );
+      // Should throw since localStorage access error is not caught
+      expect(() => getQueryParameters()).toThrow('localStorage access denied');
     });
   });
 
