@@ -292,7 +292,7 @@ export class DuckDBMemoryManager {
             await this.conn.query("SET threads=4");
             
             // Enable aggressive garbage collection for temp objects
-            await this.conn.query("SET temp_directory='/tmp/duckdb'");
+            await this.conn.query("SET temp_directory='<TEMP_DIR_PLACEHOLDER>'");
             
             console.log('DuckDB memory settings optimized');
         } catch (error) {
