@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "generate-archives": "tsc scripts/generate_archives.ts --outDir dist --esModuleInterop && node dist/scripts/generate_archives.js"
   },
   "dependencies": {
     "@apache-arrow/ts": "^17.0.0",
