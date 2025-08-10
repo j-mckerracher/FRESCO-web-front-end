@@ -1,60 +1,43 @@
-import React, { useEffect, useState } from 'react';
-import { downloadArchive } from '@/util/archive-client';
+import React, { useEffect, useState } from "react";
 
-interface DownloadProgressProps {
-    /** URL to download from */
-    url: string;
-    /** Expected SHA-256 checksum returned by the API */
-    checksum: string;
+interface ProgressState {
+  name: string;
+  received: number;
+  total: number;
 }
 
-/**
- * Component that displays download progress and verification status.
- */
-const DownloadProgress: React.FC<DownloadProgressProps> = ({ url, checksum }) => {
-    const [progress, setProgress] = useState(0);
-    const [verified, setVerified] = useState<boolean | null>(null);
+const DownloadProgress: React.FC = () => {
+  const [progress, setProgress] = useState<ProgressState | null>(null);
 
-    useEffect(() => {
-        let mounted = true;
-        const run = async () => {
-            try {
-                const result = await downloadArchive(url, checksum, setProgress);
-                if (mounted) {
-                    setVerified(result.verified);
-                }
-            } catch (err) {
-                console.error('Download failed', err);
-                if (mounted) {
-                    setVerified(false);
-                }
-            }
-        };
-        run();
-        return () => {
-            mounted = false;
-        };
-    }, [url, checksum]);
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+      const handler = (event: MessageEvent) => {
+        const data = event.data as any;
+        if (data.type === "PROGRESS") {
+          setProgress({ name: data.name, received: data.received, total: data.total });
+        }
+      };
+      navigator.serviceWorker.addEventListener("message", handler);
+      return () => navigator.serviceWorker.removeEventListener("message", handler);
+    }
+  }, []);
 
-    return (
-        <div className="w-full max-w-md p-4">
-            <div className="h-2 bg-gray-200 rounded">
-                <div
-                    className="h-2 bg-purdue-boilermakerGold rounded"
-                    style={{ width: `${progress}%` }}
-                />
-            </div>
-            {verified !== null && (
-                <p
-                    className={`mt-2 text-sm ${
-                        verified ? 'text-green-600' : 'text-red-600'
-                    }`}
-                >
-                    {verified ? 'Download verified' : 'Checksum mismatch'}
-                </p>
-            )}
-        </div>
-    );
+  if (!progress) return null;
+  const pct = (progress.received / progress.total) * 100;
+
+  return (
+    <div className="mt-4">
+      <p>
+        {progress.name}: {pct.toFixed(1)}%
+      </p>
+      <div className="w-full bg-gray-200 h-2">
+        <div
+          className="bg-purdue-boilermakerGold h-2"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
 };
 
 export default DownloadProgress;
