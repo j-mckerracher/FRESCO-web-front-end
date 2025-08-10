@@ -1,0 +1,26 @@
+name: Generate Data Archives
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - run: npm ci
+      - run: npm run generate-archives
+        env:
+          SOURCE_BUCKET: ${{ secrets.SOURCE_BUCKET }}
+          SOURCE_PREFIX: ${{ secrets.SOURCE_PREFIX }}
+          ARCHIVE_BUCKET: ${{ secrets.ARCHIVE_BUCKET }}
