@@ -24,6 +24,28 @@ The `pages/api` directory is mapped to `/api/*`. Files in this directory are tre
 
 This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
 
+## CLI Download
+
+Use pre‑signed URLs to download release assets from S3.
+
+### AWS CLI
+
+```bash
+aws s3 sync "<PRESIGNED_S3_URL>" ./downloaded-files --no-sign-request --request-payer requester
+```
+
+### curl
+
+```bash
+curl -L "<PRESIGNED_S3_URL>" -o asset.zip
+```
+
+Pre‑signed URLs embed the necessary temporary credentials, so no additional AWS
+authentication is required. If the bucket is configured as
+[Requester Pays](https://docs.aws.amazon.com/AmazonS3/latest/userguide/RequesterPaysBuckets.html),
+include `--request-payer requester` with the AWS CLI or append
+`x-amz-request-payer=requester` to the query string when using `curl`.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
