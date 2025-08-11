@@ -8,6 +8,8 @@ interface Props {
 const ArchiveSelector: React.FC<Props> = ({ archives }) => {
   const [selected, setSelected] = useState<ArchiveMetadata | null>(null);
   const [offset, setOffset] = useState(0);
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
 
   useEffect(() => {
     if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
@@ -23,11 +25,13 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
   }, [selected]);
 
   const post = (type: string) => {
-    if (!selected) return;
+    if (!selected || !start || !end) return;
     navigator.serviceWorker.controller?.postMessage({
       type,
       archive: selected,
       offset,
+      start,
+      end,
     });
   };
 
@@ -48,10 +52,31 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
           </option>
         ))}
       </select>
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2">
+        <div className="flex gap-2">
+          <label className="flex flex-col">
+            <span className="text-sm">Start Time</span>
+            <input
+              type="datetime-local"
+              className="border p-2"
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col">
+            <span className="text-sm">End Time</span>
+            <input
+              type="datetime-local"
+              className="border p-2"
+              value={end}
+              onChange={(e) => setEnd(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="flex gap-2">
         <button
           onClick={() => post("DOWNLOAD")}
-          disabled={!selected}
+          disabled={!selected || !start || !end}
           className="bg-purdue-boilermakerGold px-4 py-2 rounded"
         >
           Start
@@ -65,11 +90,12 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
         </button>
         <button
           onClick={() => post("DOWNLOAD")}
-          disabled={!selected}
+          disabled={!selected || !start || !end}
           className="bg-green-300 px-4 py-2 rounded"
         >
           Resume
         </button>
+        </div>
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ export async function fetchArchives(): Promise<ArchiveMetadata[]> {
     throw new Error("Failed to fetch archives");
   }
   return res.json();
+}
 
 /**
  * Utility functions for downloading archives and verifying their integrity.

@@ -11,6 +11,7 @@ const Header = () => {
         <Link href="/">Home</Link>
         <Link href="/about">About</Link>
         <Link href="/team">Team</Link>
+        <Link href="/bulk-download">Bulk Download</Link>
         {/* <a href="/News">News</a> */}
       </nav>
     </header>

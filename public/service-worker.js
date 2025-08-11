@@ -6,17 +6,24 @@ self.addEventListener('activate', () => self.clients.claim());
 self.addEventListener('message', (event) => {
   const data = event.data;
   if (data.type === 'DOWNLOAD') {
-    handleDownload(data.archive, data.offset || 0, event.source);
+    handleDownload(data.archive, data.offset || 0, event.source, data.start, data.end);
   } else if (data.type === 'ABORT') {
     const c = controllers[data.archive?.name];
     c && c.abort();
   }
 });
 
-async function handleDownload(archive, offset, client) {
+async function handleDownload(archive, offset, client, start, end) {
   const controller = new AbortController();
   controllers[archive.name] = controller;
-  const response = await fetch(`/bulk-download/archives/${archive.name}`, {
+  const params = new URLSearchParams();
+  if (start) params.append('start', start);
+  if (end) params.append('end', end);
+  const qs = params.toString();
+  const url = qs
+    ? `/bulk-download/archives/${archive.name}?${qs}`
+    : `/bulk-download/archives/${archive.name}`;
+  const response = await fetch(url, {
     headers: { Range: `bytes=${offset}-` },
     signal: controller.signal,
   });
