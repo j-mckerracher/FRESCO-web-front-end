@@ -1,29 +1,43 @@
 import type { NextApiRequest, NextApiResponse } from "next";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-// Reuse the same archive data as in index.ts
-const ARCHIVES: Record<string, Buffer> = {
-  "dataset-a.zip": Buffer.from("Demo content for dataset A"),
-  "dataset-b.zip": Buffer.from("Demo content for dataset B"),
-};
+const BUCKET_NAME = "fresco-archive-data";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+// Initialize S3 client
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || "us-east-1",
+});
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { name } = req.query;
-  const data = ARCHIVES[name as string];
-  if (!data) {
-    res.status(404).end("Not found");
-    return;
+  
+  if (!name || typeof name !== 'string') {
+    return res.status(400).json({ error: 'Archive name is required' });
   }
 
-  const range = req.headers.range;
-  let start = 0;
-  if (range) {
-    const match = /bytes=(\d+)-/i.exec(range);
-    if (match) {
-      start = parseInt(match[1], 10);
+  try {
+    // Generate a presigned URL for downloading the archive
+    const command = new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: name,
+    });
+
+    // Generate presigned URL valid for 1 hour
+    const presignedUrl = await getSignedUrl(s3Client, command, { 
+      expiresIn: 3600 
+    });
+
+    // Redirect to the presigned URL
+    res.redirect(302, presignedUrl);
+  } catch (error) {
+    console.error(`Error generating presigned URL for ${name}:`, error);
+    
+    // Check if it's a NoSuchKey error (file not found)
+    if (error instanceof Error && error.name === 'NoSuchKey') {
+      return res.status(404).json({ error: 'Archive not found' });
     }
+    
+    return res.status(500).json({ error: 'Failed to generate download URL' });
   }
-  const chunk = data.slice(start);
-  const end = data.length - 1;
-  res.setHeader("Content-Range", `bytes ${start}-${end}/${data.length}`);
-  res.status(206).send(chunk);
 }
