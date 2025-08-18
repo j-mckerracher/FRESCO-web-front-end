@@ -16,7 +16,7 @@ self.addEventListener('message', (event) => {
 async function handleDownload(archive, offset, client) {
   const controller = new AbortController();
   controllers[archive.name] = controller;
-  const response = await fetch(`/bulk-download/archives/${archive.name}`, {
+  const response = await fetch(`/bulk-download/archives/download-archive?name=${encodeURIComponent(archive.name)}`, {
     headers: { Range: `bytes=${offset}-` },
     signal: controller.signal,
   });

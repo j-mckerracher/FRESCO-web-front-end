@@ -13,8 +13,8 @@ const nextConfig = {
         destination: "/api/bulk-download/archives",
       },
       {
-        source: "/bulk-download/archives/:path*",
-        destination: "/api/bulk-download/archives/:path*",
+        source: "/bulk-download/archives/download-archive",
+        destination: "/api/bulk-download/archives/download-archive",
       },
     ];
   },

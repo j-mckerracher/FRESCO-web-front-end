@@ -4,15 +4,24 @@ import { ArchiveMetadata } from "../../../../util/archive-client";
 
 const BUCKET_NAME = "fresco-archive-data";
 
-// Initialize S3 client
+// Initialize S3 client with explicit credentials
 const s3Client = new S3Client({
   region: process.env.AWS_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
 });
 
 export default async function handler(
   _req: NextApiRequest,
   res: NextApiResponse<ArchiveMetadata[] | { error: string }>
 ) {
+  // Check for required environment variables
+  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+    return res.status(500).json({ error: 'AWS credentials not configured' });
+  }
+
   try {
     // List all objects in the fresco-archive-data bucket
     const listCommand = new ListObjectsV2Command({

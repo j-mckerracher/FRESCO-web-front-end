@@ -14,6 +14,16 @@ export async function fetchArchives(): Promise<ArchiveMetadata[]> {
 }
 
 /**
+ * Generate download URL for an archive
+ * 
+ * @param archiveName - Name of the archive to download
+ * @returns Download URL for the archive
+ */
+export function getArchiveDownloadUrl(archiveName: string): string {
+  return `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(archiveName)}`;
+}
+
+/**
  * Utility functions for downloading archives and verifying their integrity.
  */
 
