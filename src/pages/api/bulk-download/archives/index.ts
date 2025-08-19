@@ -62,16 +62,6 @@ export default async function handler(
     res.status(200).json(archives);
   } catch (error) {
     console.error('Error fetching archives from S3:', error);
-    
-    // Return more specific error information for debugging
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    const errorName = error instanceof Error ? error.name : 'Unknown';
-    
-    res.status(500).json({ 
-      error: 'Failed to fetch archives',
-      details: errorMessage,
-      errorType: errorName,
-      timestamp: new Date().toISOString()
-    });
+    res.status(500).json({ error: 'Failed to fetch archives' });
   }
 }

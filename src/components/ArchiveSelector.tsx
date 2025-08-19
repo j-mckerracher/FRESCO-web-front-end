@@ -60,7 +60,7 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
   const downloadDirect = () => {
     if (!selected) return;
     // Create direct download link to our API endpoint which redirects to S3
-    const downloadUrl = `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(selected.name)}`;
+    const downloadUrl = `/bulk-download/archives/download-archive?name=${encodeURIComponent(selected.name)}`;
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.download = selected.name;
