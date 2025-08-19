@@ -1,0 +1,134 @@
+/* Custom styles for react-datepicker dark theme */
+.react-datepicker {
+  background-color: #1f2937 !important; /* gray-800 */
+  border: 1px solid #4b5563 !important; /* gray-600 */
+  color: white !important;
+  font-family: inherit;
+}
+
+.react-datepicker__header {
+  background-color: #374151 !important; /* gray-700 */
+  border-bottom: 1px solid #4b5563 !important; /* gray-600 */
+  color: white !important;
+}
+
+.react-datepicker__current-month {
+  color: #CFB991 !important; /* purdue-boilermakerGold */
+  font-weight: bold;
+}
+
+.react-datepicker__navigation {
+  border: 0.45rem solid transparent;
+}
+
+.react-datepicker__navigation--previous {
+  border-right-color: #9ca3af !important; /* gray-400 */
+}
+
+.react-datepicker__navigation--next {
+  border-left-color: #9ca3af !important; /* gray-400 */
+}
+
+.react-datepicker__navigation:hover {
+  opacity: 0.8;
+}
+
+.react-datepicker__day-names {
+  background-color: #374151 !important; /* gray-700 */
+}
+
+.react-datepicker__day-name {
+  color: #d1d5db !important; /* gray-300 */
+}
+
+.react-datepicker__day {
+  color: white !important;
+  background-color: transparent !important;
+}
+
+.react-datepicker__day:hover {
+  background-color: #4b5563 !important; /* gray-600 */
+  color: white !important;
+}
+
+.react-datepicker__day--selected {
+  background-color: #CFB991 !important; /* purdue-boilermakerGold */
+  color: black !important;
+}
+
+.react-datepicker__day--selected:hover {
+  background-color: #DAAA00 !important; /* purdue-rush */
+  color: black !important;
+}
+
+.react-datepicker__day--keyboard-selected {
+  background-color: #4b5563 !important; /* gray-600 */
+  color: white !important;
+}
+
+.react-datepicker__day--outside-month {
+  color: #6b7280 !important; /* gray-500 */
+}
+
+.react-datepicker__day--disabled {
+  color: #6b7280 !important; /* gray-500 */
+  cursor: not-allowed;
+}
+
+.react-datepicker__day--disabled:hover {
+  background-color: transparent !important;
+}
+
+.react-datepicker__month {
+  background-color: #1f2937 !important; /* gray-800 */
+}
+
+.react-datepicker__week {
+  color: white !important;
+}
+
+.react-datepicker__time-container {
+  background-color: #1f2937 !important; /* gray-800 */
+  border-left: 1px solid #4b5563 !important; /* gray-600 */
+}
+
+.react-datepicker__time-container .react-datepicker__time {
+  background-color: #1f2937 !important; /* gray-800 */
+}
+
+.react-datepicker__time-container .react-datepicker__time .react-datepicker__time-box {
+  background-color: #1f2937 !important; /* gray-800 */
+}
+
+.react-datepicker__time-list-item {
+  color: white !important;
+  background-color: transparent !important;
+}
+
+.react-datepicker__time-list-item:hover {
+  background-color: #4b5563 !important; /* gray-600 */
+}
+
+.react-datepicker__time-list-item--selected {
+  background-color: #CFB991 !important; /* purdue-boilermakerGold */
+  color: black !important;
+}
+
+.react-datepicker__time-list-item--selected:hover {
+  background-color: #DAAA00 !important; /* purdue-rush */
+}
+
+.react-datepicker__input-container input {
+  background-color: #1f2937 !important; /* gray-800 */
+  border: 1px solid #4b5563 !important; /* gray-600 */
+  color: white !important;
+}
+
+.react-datepicker__input-container input:focus {
+  outline: none !important;
+  ring: 2px solid #CFB991 !important; /* purdue-boilermakerGold */
+}
+
+.react-datepicker__triangle {
+  border-bottom-color: #1f2937 !important; /* gray-800 */
+}
