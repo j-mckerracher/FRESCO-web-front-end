@@ -6,7 +6,7 @@ export interface ArchiveMetadata {
 }
 
 export async function fetchArchives(): Promise<ArchiveMetadata[]> {
-  const res = await fetch("/api/bulk-download/archives");
+  const res = await fetch("/bulk-download/archives");
   if (!res.ok) {
     throw new Error("Failed to fetch archives");
   }
@@ -20,7 +20,7 @@ export async function fetchArchives(): Promise<ArchiveMetadata[]> {
  * @returns Download URL for the archive
  */
 export function getArchiveDownloadUrl(archiveName: string): string {
-  return `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(archiveName)}`;
+  return `/bulk-download/archives/download-archive?name=${encodeURIComponent(archiveName)}`;
 }
 
 /**
