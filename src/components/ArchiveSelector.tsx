@@ -17,6 +17,23 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
         const data = event.data as any;
         if (data.type === "PROGRESS" && selected && data.name === selected.name) {
           setOffset(data.received);
+        } else if (data.type === "DOWNLOAD_READY" && selected && data.name === selected.name) {
+          // Trigger browser download
+          const link = document.createElement('a');
+          link.href = data.url;
+          link.download = data.name;
+          link.style.display = 'none';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          // Clean up blob URL if it was created
+          if (data.isBlob) {
+            setTimeout(() => URL.revokeObjectURL(data.url), 1000);
+          }
+        } else if (data.type === "ERROR" && selected && data.name === selected.name) {
+          console.error("Download error:", data.error);
+          alert(`Download failed: ${data.error}`);
         }
       };
       navigator.serviceWorker.addEventListener("message", handler);
@@ -35,10 +52,24 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
     });
   };
 
+  const downloadDirect = () => {
+    if (!selected) return;
+    // Create direct download link to our API endpoint which redirects to S3
+    const downloadUrl = `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(selected.name)}`;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = selected.name;
+    link.target = '_blank'; // Open in new tab to handle redirects properly
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="flex flex-col gap-2">
       <select
-        className="border p-2"
+        className="border border-gray-600 bg-gray-800 text-white p-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-purdue-boilermakerGold"
         onChange={(e) => {
           const a = archives.find((x) => x.name === e.target.value) || null;
           setSelected(a);
@@ -52,49 +83,60 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
           </option>
         ))}
       </select>
-      <div className="flex flex-col gap-2">
-        <div className="flex gap-2">
+      
+      {/* Time Range Inputs */}
+      <div className="flex flex-col gap-3 mt-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="flex flex-col">
-            <span className="text-sm">Start Time</span>
+            <span className="text-sm text-gray-300 mb-1">Start Time</span>
             <input
               type="datetime-local"
-              className="border p-2"
+              className="border border-gray-600 bg-gray-800 text-white p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purdue-boilermakerGold"
               value={start}
               onChange={(e) => setStart(e.target.value)}
             />
           </label>
           <label className="flex flex-col">
-            <span className="text-sm">End Time</span>
+            <span className="text-sm text-gray-300 mb-1">End Time</span>
             <input
               type="datetime-local"
-              className="border p-2"
+              className="border border-gray-600 bg-gray-800 text-white p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purdue-boilermakerGold"
               value={end}
               onChange={(e) => setEnd(e.target.value)}
             />
           </label>
         </div>
-        <div className="flex gap-2">
-        <button
-          onClick={() => post("DOWNLOAD")}
-          disabled={!selected || !start || !end}
-          className="bg-purdue-boilermakerGold px-4 py-2 rounded"
-        >
-          Start
-        </button>
-        <button
-          onClick={() => post("ABORT")}
-          disabled={!selected}
-          className="bg-gray-300 px-4 py-2 rounded"
-        >
-          Pause
-        </button>
-        <button
-          onClick={() => post("DOWNLOAD")}
-          disabled={!selected || !start || !end}
-          className="bg-green-300 px-4 py-2 rounded"
-        >
-          Resume
-        </button>
+        
+        {/* Action Buttons */}
+        <div className="flex gap-3 flex-wrap">
+          <button
+            onClick={downloadDirect}
+            disabled={!selected}
+            className="bg-purdue-boilermakerGold px-6 py-3 rounded-lg text-black font-semibold hover:bg-yellow-500 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            Download Full Archive
+          </button>
+          <button
+            onClick={() => post("DOWNLOAD")}
+            disabled={!selected || !start || !end}
+            className="bg-blue-500 px-6 py-3 rounded-lg text-white font-semibold hover:bg-blue-600 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            Download Time Range
+          </button>
+          <button
+            onClick={() => post("ABORT")}
+            disabled={!selected}
+            className="bg-gray-500 px-6 py-3 rounded-lg text-white font-semibold hover:bg-gray-600 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            Pause
+          </button>
+          <button
+            onClick={() => post("DOWNLOAD")}
+            disabled={!selected}
+            className="bg-green-500 px-6 py-3 rounded-lg text-white font-semibold hover:bg-green-600 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            Resume
+          </button>
         </div>
       </div>
     </div>
