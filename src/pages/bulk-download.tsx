@@ -64,8 +64,11 @@ const BulkDownloadPage: React.FC = () => {
                 Select an archive and choose a time window to download data.
               </p>
               <p className="text-gray-300 text-sm">
-                Pre-packaged data archives are available for download. Each archive contains 
+                Pre-packaged data archives are available for download. Each archive contains
                 curated datasets with verified checksums for integrity validation.
+              </p>
+              <p className="text-gray-300 text-sm mt-4">
+                Filenames containing an <code>_S</code> are Stampede data files, <code>_C</code> are Conte data files, and filenames without these suffixes are Anvil data files. Anvil data spans June 2022 to June 2023, Conte data spans April 2015 to June 2017, and Stampede data spans February 2013 to April 2018.
               </p>
             </div>
           </div>

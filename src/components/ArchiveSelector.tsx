@@ -11,10 +11,15 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
 
+  type SWMessage =
+    | { type: "PROGRESS"; name: string; received: number }
+    | { type: "DOWNLOAD_READY"; name: string; url: string; isBlob?: boolean }
+    | { type: "ERROR"; name: string; error: string };
+
   useEffect(() => {
     if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
-      const handler = (event: MessageEvent) => {
-        const data = event.data as any;
+      const handler = (event: MessageEvent<SWMessage>) => {
+        const data = event.data;
         if (data.type === "PROGRESS" && selected && data.name === selected.name) {
           setOffset(data.received);
         } else if (data.type === "DOWNLOAD_READY" && selected && data.name === selected.name) {
@@ -70,6 +75,7 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
     <div className="flex flex-col gap-2">
       <select
         className="border border-gray-600 bg-gray-800 text-white p-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-purdue-boilermakerGold"
+        value={selected?.name || ""}
         onChange={(e) => {
           const a = archives.find((x) => x.name === e.target.value) || null;
           setSelected(a);

@@ -26,7 +26,7 @@ async function handleDownload(archive, offset, client, start, end) {
       if (start) params.append('start', start);
       if (end) params.append('end', end);
       
-      const downloadUrl = `/bulk-download/archives/download-archive?${params.toString()}`;
+      const downloadUrl = `/api/bulk-download/archives/download-archive?${params.toString()}`;
       
       // Trigger browser download by creating a temporary link
       client.postMessage({ 
@@ -43,7 +43,7 @@ async function handleDownload(archive, offset, client, start, end) {
     if (start) params.append('start', start);
     if (end) params.append('end', end);
     
-    const response = await fetch(`/bulk-download/archives/download-archive?${params.toString()}`, {
+    const response = await fetch(`/api/bulk-download/archives/download-archive?${params.toString()}`, {
       headers: { Range: `bytes=${offset}-` },
       signal: controller.signal,
     });
