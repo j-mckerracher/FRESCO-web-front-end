@@ -20,7 +20,7 @@ export async function fetchArchives(): Promise<ArchiveMetadata[]> {
  * @returns Download URL for the archive
  */
 export function getArchiveDownloadUrl(archiveName: string): string {
-  return `/bulk-download/archives/download-archive?name=${encodeURIComponent(archiveName)}`;
+  return `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(archiveName)}`;
 }
 
 /**
