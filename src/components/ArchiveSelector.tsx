@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 import type { ArchiveMetadata } from "../util/archive-client";
 
 interface Props {
@@ -8,8 +10,8 @@ interface Props {
 const ArchiveSelector: React.FC<Props> = ({ archives }) => {
   const [selected, setSelected] = useState<ArchiveMetadata | null>(null);
   const [offset, setOffset] = useState(0);
-  const [start, setStart] = useState("");
-  const [end, setEnd] = useState("");
+  const [start, setStart] = useState<Date | null>(null);
+  const [end, setEnd] = useState<Date | null>(null);
 
   type SWMessage =
     | { type: "PROGRESS"; name: string; received: number }
@@ -52,8 +54,8 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
       type,
       archive: selected,
       offset,
-      start,
-      end,
+      start: start.toISOString(),
+      end: end.toISOString(),
     });
   };
 
@@ -95,20 +97,31 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="flex flex-col">
             <span className="text-sm text-gray-300 mb-1">Start Time</span>
-            <input
-              type="datetime-local"
-              className="border border-gray-600 bg-gray-800 text-white p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purdue-boilermakerGold"
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
+            <DatePicker
+              selected={start}
+              onChange={(date: Date | null) => setStart(date)}
+              showTimeSelect
+              timeFormat="HH:mm"
+              timeIntervals={15}
+              dateFormat="MMMM d, yyyy h:mm aa"
+              className="border border-gray-600 bg-gray-800 text-white p-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-purdue-boilermakerGold"
+              placeholderText="Select start date and time"
+              wrapperClassName="w-full"
             />
           </label>
           <label className="flex flex-col">
             <span className="text-sm text-gray-300 mb-1">End Time</span>
-            <input
-              type="datetime-local"
-              className="border border-gray-600 bg-gray-800 text-white p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purdue-boilermakerGold"
-              value={end}
-              onChange={(e) => setEnd(e.target.value)}
+            <DatePicker
+              selected={end}
+              onChange={(date: Date | null) => setEnd(date)}
+              showTimeSelect
+              timeFormat="HH:mm"
+              timeIntervals={15}
+              dateFormat="MMMM d, yyyy h:mm aa"
+              className="border border-gray-600 bg-gray-800 text-white p-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-purdue-boilermakerGold"
+              placeholderText="Select end date and time"
+              wrapperClassName="w-full"
+              minDate={start}
             />
           </label>
         </div>
