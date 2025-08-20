@@ -84,6 +84,23 @@ export default async function handler(
       console.error('AWS SDK Error metadata:', (error as any).$metadata);
     }
     console.error('=== END S3 ERROR DETAILS ===');
-    res.status(500).json({ error: 'Failed to fetch archives' });
+    
+    // Include debug info in response for browser console
+    const debugInfo = {
+      errorType: typeof error,
+      errorName: error instanceof Error ? error.name : 'unknown',
+      errorMessage: error instanceof Error ? error.message : 'unknown',
+      awsMetadata: error && typeof error === 'object' && '$metadata' in error ? (error as any).$metadata : null,
+      credentials: {
+        accessKeyPresent: !!process.env.AWS_ACCESS_KEY_ID,
+        secretKeyPresent: !!process.env.AWS_SECRET_ACCESS_KEY,
+        region: process.env.AWS_REGION || 'us-east-1'
+      }
+    };
+    
+    res.status(500).json({ 
+      error: 'Failed to fetch archives',
+      debug: debugInfo
+    });
   }
 }

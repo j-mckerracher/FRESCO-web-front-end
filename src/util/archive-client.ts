@@ -6,11 +6,45 @@ export interface ArchiveMetadata {
 }
 
 export async function fetchArchives(): Promise<ArchiveMetadata[]> {
+  console.log('🔍 BULK DOWNLOAD DEBUG: Fetching archives from API...');
+  
   const res = await fetch("/api/bulk-download/archives");
+  
+  console.log('🔍 BULK DOWNLOAD DEBUG: Response status:', res.status);
+  console.log('🔍 BULK DOWNLOAD DEBUG: Response headers:', Object.fromEntries(res.headers.entries()));
+  
   if (!res.ok) {
-    throw new Error("Failed to fetch archives");
+    console.error('🚨 BULK DOWNLOAD ERROR: API request failed');
+    console.error('🚨 Response status:', res.status);
+    console.error('🚨 Response statusText:', res.statusText);
+    
+    try {
+      const errorText = await res.text();
+      console.error('🚨 Raw response body:', errorText);
+      
+      // Try to parse as JSON
+      let errorData = {};
+      try {
+        errorData = JSON.parse(errorText);
+        console.error('🚨 Parsed error data:', errorData);
+      } catch (parseErr) {
+        console.error('🚨 Could not parse response as JSON');
+      }
+      
+      if (res.status === 500) {
+        throw new Error(errorData.error || errorText || "Service temporarily unavailable");
+      }
+      throw new Error(`Failed to fetch archives (${res.status}): ${errorText}`);
+    } catch (textErr) {
+      console.error('🚨 Could not read response text:', textErr);
+      throw new Error(`Failed to fetch archives (${res.status})`);
+    }
   }
-  return res.json();
+  
+  console.log('✅ BULK DOWNLOAD DEBUG: API request successful');
+  const data = await res.json();
+  console.log('✅ BULK DOWNLOAD DEBUG: Received', data.length, 'archives');
+  return data;
 }
 
 /**
