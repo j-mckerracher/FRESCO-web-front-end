@@ -17,18 +17,31 @@ export default async function handler(
   _req: NextApiRequest,
   res: NextApiResponse<ArchiveMetadata[] | { error: string }>
 ) {
+  // Debug logging
+  console.log('=== BULK DOWNLOAD API DEBUG ===');
+  console.log('AWS_ACCESS_KEY_ID present:', !!process.env.AWS_ACCESS_KEY_ID);
+  console.log('AWS_SECRET_ACCESS_KEY present:', !!process.env.AWS_SECRET_ACCESS_KEY);
+  console.log('AWS_REGION:', process.env.AWS_REGION || 'not set (will use us-east-1)');
+  console.log('BUCKET_NAME:', BUCKET_NAME);
+  
   // Check for required environment variables
   if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
-    return res.status(500).json({ error: 'AWS credentials not configured' });
+    console.error('AWS credentials not configured in environment variables');
+    return res.status(500).json({ 
+      error: 'Service temporarily unavailable. AWS credentials not configured.' 
+    });
   }
 
   try {
+    console.log('Attempting to list S3 objects...');
     // List all objects in the fresco-archive-data bucket
     const listCommand = new ListObjectsV2Command({
       Bucket: BUCKET_NAME,
     });
 
+    console.log('Sending ListObjectsV2Command to S3...');
     const response = await s3Client.send(listCommand);
+    console.log('S3 response received, Contents length:', response.Contents?.length || 0);
 
     if (!response.Contents) {
       return res.status(200).json([]);
@@ -61,7 +74,16 @@ export default async function handler(
     
     res.status(200).json(archives);
   } catch (error) {
+    console.error('=== S3 ERROR DETAILS ===');
     console.error('Error fetching archives from S3:', error);
+    console.error('Error type:', typeof error);
+    console.error('Error name:', error instanceof Error ? error.name : 'unknown');
+    console.error('Error message:', error instanceof Error ? error.message : 'unknown');
+    console.error('Error stack:', error instanceof Error ? error.stack : 'unknown');
+    if (error && typeof error === 'object' && '$metadata' in error) {
+      console.error('AWS SDK Error metadata:', (error as any).$metadata);
+    }
+    console.error('=== END S3 ERROR DETAILS ===');
     res.status(500).json({ error: 'Failed to fetch archives' });
   }
 }
