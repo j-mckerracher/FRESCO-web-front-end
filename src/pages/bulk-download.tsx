@@ -19,7 +19,15 @@ const BulkDownloadPage: React.FC = () => {
         setArchives(archivesData);
       } catch (err) {
         console.error('Error fetching archives:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load archives');
+        let errorMessage = 'Failed to load archives';
+        if (err instanceof Error) {
+          if (err.message.includes('Service temporarily unavailable')) {
+            errorMessage = 'Archive service is temporarily unavailable. Please try again later or contact support if the issue persists.';
+          } else {
+            errorMessage = err.message;
+          }
+        }
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
@@ -41,7 +49,15 @@ const BulkDownloadPage: React.FC = () => {
         setArchives(archivesData);
       } catch (err) {
         console.error('Error fetching archives:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load archives');
+        let errorMessage = 'Failed to load archives';
+        if (err instanceof Error) {
+          if (err.message.includes('Service temporarily unavailable')) {
+            errorMessage = 'Archive service is temporarily unavailable. Please try again later or contact support if the issue persists.';
+          } else {
+            errorMessage = err.message;
+          }
+        }
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
