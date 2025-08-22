@@ -59,7 +59,7 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
     });
   };
 
-  const downloadRange = () => {
+  const downloadRange = async () => {
     if (!start || !end) return;
 
     const months: string[] = [];
@@ -73,20 +73,23 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
       current.setMonth(current.getMonth() + 1);
     }
 
-    months.forEach((m) => {
+    for (const m of months) {
       const archiveName = `${m}.zip`;
       const archive = archives.find((a) => a.name === archiveName);
       if (archive) {
         const downloadUrl = `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(archive.name)}`;
-        const link = document.createElement("a");
+        const link = document.createElement('a');
         link.href = downloadUrl;
         link.download = archive.name;
-        link.style.display = "none";
+        link.target = '_blank';
+        link.style.display = 'none';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        // Small delay to avoid browsers blocking multiple automatic downloads
+        await new Promise((r) => setTimeout(r, 500));
       }
-    });
+    }
   };
 
   const downloadDirect = () => {
