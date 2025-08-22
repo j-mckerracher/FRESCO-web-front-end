@@ -59,6 +59,36 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
     });
   };
 
+  const downloadRange = () => {
+    if (!start || !end) return;
+
+    const months: string[] = [];
+    const current = new Date(start.getFullYear(), start.getMonth(), 1);
+    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+
+    while (current <= endMonth) {
+      const year = current.getFullYear();
+      const month = String(current.getMonth() + 1).padStart(2, "0");
+      months.push(`${year}-${month}`);
+      current.setMonth(current.getMonth() + 1);
+    }
+
+    months.forEach((m) => {
+      const archiveName = `${m}.zip`;
+      const archive = archives.find((a) => a.name === archiveName);
+      if (archive) {
+        const downloadUrl = `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(archive.name)}`;
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = archive.name;
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    });
+  };
+
   const downloadDirect = () => {
     if (!selected) return;
     // Create direct download link to our API endpoint which redirects to S3
@@ -136,8 +166,8 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
             Download Full Archive
           </button>
           <button
-            onClick={() => post("DOWNLOAD")}
-            disabled={!selected || !start || !end}
+            onClick={downloadRange}
+            disabled={!start || !end}
             className="bg-blue-500 px-6 py-3 rounded-lg text-white font-semibold hover:bg-blue-600 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             Download Time Range
