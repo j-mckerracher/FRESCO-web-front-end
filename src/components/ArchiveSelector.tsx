@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import type { ArchiveMetadata } from "../util/archive-client";
+import { getArchiveDownloadUrl } from "../util/archive-client";
 
 interface Props {
   archives: ArchiveMetadata[];
@@ -91,11 +92,10 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
 
     let completed = 0;
     for (const archive of toDownload) {
-      const downloadUrl = `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(archive.name)}`;
+      const downloadUrl = getArchiveDownloadUrl(archive.name);
       const link = document.createElement("a");
       link.href = downloadUrl;
       link.download = archive.name;
-      link.target = "_blank";
       link.style.display = "none";
       document.body.appendChild(link);
       link.click();
@@ -108,15 +108,15 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
           })
         );
       }
-      // Small delay to avoid browsers blocking multiple automatic downloads
-      await new Promise((r) => setTimeout(r, 500));
+      // Delay to let each download begin before triggering the next
+      await new Promise((r) => setTimeout(r, 1000));
     }
   };
 
   const downloadDirect = () => {
     if (!selected) return;
     // Create direct download link to our API endpoint which redirects to S3
-    const downloadUrl = `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(selected.name)}`;
+    const downloadUrl = getArchiveDownloadUrl(selected.name);
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.download = selected.name;
