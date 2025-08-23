@@ -50,13 +50,13 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
   }, [selected]);
 
   const post = (type: string) => {
-    if (!selected || !start || !end) return;
+    if (!selected) return;
     navigator.serviceWorker.controller?.postMessage({
       type,
       archive: selected,
       offset,
-      start: start.toISOString(),
-      end: end.toISOString(),
+      ...(start ? { start: start.toISOString() } : {}),
+      ...(end ? { end: end.toISOString() } : {}),
     });
   };
 
@@ -113,18 +113,14 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
     }
   };
 
-  const downloadDirect = () => {
+  const downloadFull = () => {
     if (!selected) return;
-    // Create direct download link to our API endpoint which redirects to S3
-    const downloadUrl = getArchiveDownloadUrl(selected.name);
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = selected.name;
-    link.target = '_blank'; // Open in new tab to handle redirects properly
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    setOffset(0);
+    navigator.serviceWorker.controller?.postMessage({
+      type: "DOWNLOAD",
+      archive: selected,
+      offset: 0,
+    });
   };
 
   return (
@@ -183,7 +179,7 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
         {/* Action Buttons */}
         <div className="flex gap-3 flex-wrap">
           <button
-            onClick={downloadDirect}
+            onClick={downloadFull}
             disabled={!selected}
             className="bg-purdue-boilermakerGold px-6 py-3 rounded-lg text-black font-semibold hover:bg-yellow-500 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
           >
