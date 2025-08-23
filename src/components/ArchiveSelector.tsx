@@ -73,19 +73,35 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
       current.setMonth(current.getMonth() + 1);
     }
 
+    const total = months.length;
+    if (total > 1) {
+      window.dispatchEvent(
+        new CustomEvent("archive-progress", { detail: { current: 0, total } })
+      );
+    }
+
+    let completed = 0;
     for (const m of months) {
       const archiveName = `${m}.zip`;
       const archive = archives.find((a) => a.name === archiveName);
       if (archive) {
         const downloadUrl = `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(archive.name)}`;
-        const link = document.createElement('a');
+        const link = document.createElement("a");
         link.href = downloadUrl;
         link.download = archive.name;
-        link.target = '_blank';
-        link.style.display = 'none';
+        link.target = "_blank";
+        link.style.display = "none";
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        completed += 1;
+        if (total > 1) {
+          window.dispatchEvent(
+            new CustomEvent("archive-progress", {
+              detail: { current: completed, total },
+            })
+          );
+        }
         // Small delay to avoid browsers blocking multiple automatic downloads
         await new Promise((r) => setTimeout(r, 500));
       }
