@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import type { ArchiveMetadata } from "../util/archive-client";
+import { getArchiveDownloadUrl } from "../util/archive-client";
 
 interface Props {
   archives: ArchiveMetadata[];
@@ -9,68 +10,78 @@ interface Props {
 
 const ArchiveSelector: React.FC<Props> = ({ archives }) => {
   const [selected, setSelected] = useState<ArchiveMetadata | null>(null);
-  const [offset, setOffset] = useState(0);
   const [start, setStart] = useState<Date | null>(null);
   const [end, setEnd] = useState<Date | null>(null);
 
-  type SWMessage =
-    | { type: "PROGRESS"; name: string; received: number }
-    | { type: "DOWNLOAD_READY"; name: string; url: string; isBlob?: boolean }
-    | { type: "ERROR"; name: string; error: string };
-
-  useEffect(() => {
-    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
-      const handler = (event: MessageEvent<SWMessage>) => {
-        const data = event.data;
-        if (data.type === "PROGRESS" && selected && data.name === selected.name) {
-          setOffset(data.received);
-        } else if (data.type === "DOWNLOAD_READY" && selected && data.name === selected.name) {
-          // Trigger browser download
-          const link = document.createElement('a');
-          link.href = data.url;
-          link.download = data.name;
-          link.style.display = 'none';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          
-          // Clean up blob URL if it was created
-          if (data.isBlob) {
-            setTimeout(() => URL.revokeObjectURL(data.url), 1000);
-          }
-        } else if (data.type === "ERROR" && selected && data.name === selected.name) {
-          console.error("Download error:", data.error);
-          alert(`Download failed: ${data.error}`);
-        }
-      };
-      navigator.serviceWorker.addEventListener("message", handler);
-      return () => navigator.serviceWorker.removeEventListener("message", handler);
+  const downloadArchives = async (toDownload: ArchiveMetadata[]) => {
+    const total = toDownload.length;
+    if (total === 0) return;
+    if (total > 1) {
+      window.dispatchEvent(
+        new CustomEvent("archive-progress", { detail: { current: 0, total } })
+      );
     }
-  }, [selected]);
 
-  const post = (type: string) => {
-    if (!selected || !start || !end) return;
-    navigator.serviceWorker.controller?.postMessage({
-      type,
-      archive: selected,
-      offset,
-      start: start.toISOString(),
-      end: end.toISOString(),
-    });
+    let completed = 0;
+    for (const archive of toDownload) {
+      const url = getArchiveDownloadUrl(archive.name);
+      // Trigger browser download without fetching to avoid CORS issues
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = archive.name;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      completed += 1;
+      if (total > 1) {
+        window.dispatchEvent(
+          new CustomEvent("archive-progress", {
+            detail: { current: completed, total },
+          })
+        );
+      }
+
+      // Small delay to prevent the browser from blocking multiple downloads
+      await new Promise((r) => setTimeout(r, 200));
+    }
   };
 
-  const downloadDirect = () => {
-    if (!selected) return;
-    // Create direct download link to our API endpoint which redirects to S3
-    const downloadUrl = `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(selected.name)}`;
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = selected.name;
-    link.target = '_blank'; // Open in new tab to handle redirects properly
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const downloadRange = async () => {
+    if (!start || !end) return;
+
+    const archiveMap = new Map(archives.map((a) => [a.name, a]));
+    const toDownload: ArchiveMetadata[] = [];
+    const current = new Date(start.getFullYear(), start.getMonth(), 1);
+    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+
+    while (current <= endMonth) {
+      const year = current.getFullYear();
+      const month = String(current.getMonth() + 1).padStart(2, "0");
+      const name = `${year}-${month}.zip`;
+      const archive = archiveMap.get(name);
+      if (archive) {
+        toDownload.push(archive);
+      }
+      current.setMonth(current.getMonth() + 1);
+    }
+
+    if (toDownload.length === 0) {
+      alert("No archives available in the selected range.");
+      return;
+    }
+
+    await downloadArchives(toDownload);
+  };
+
+  const downloadFull = async () => {
+    if (archives.length === 0) return;
+    const confirmed = window.confirm(
+      `Download all ${archives.length} files?`
+    );
+    if (!confirmed) return;
+    await downloadArchives(archives);
   };
 
   return (
@@ -81,7 +92,6 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
         onChange={(e) => {
           const a = archives.find((x) => x.name === e.target.value) || null;
           setSelected(a);
-          setOffset(0);
         }}
       >
         <option value="">Select archive</option>
@@ -129,32 +139,18 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
         {/* Action Buttons */}
         <div className="flex gap-3 flex-wrap">
           <button
-            onClick={downloadDirect}
-            disabled={!selected}
+            onClick={downloadFull}
+            disabled={archives.length === 0}
             className="bg-purdue-boilermakerGold px-6 py-3 rounded-lg text-black font-semibold hover:bg-yellow-500 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             Download Full Archive
           </button>
           <button
-            onClick={() => post("DOWNLOAD")}
-            disabled={!selected || !start || !end}
+            onClick={downloadRange}
+            disabled={!start || !end}
             className="bg-blue-500 px-6 py-3 rounded-lg text-white font-semibold hover:bg-blue-600 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             Download Time Range
-          </button>
-          <button
-            onClick={() => post("ABORT")}
-            disabled={!selected}
-            className="bg-gray-500 px-6 py-3 rounded-lg text-white font-semibold hover:bg-gray-600 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            Pause
-          </button>
-          <button
-            onClick={() => post("DOWNLOAD")}
-            disabled={!selected}
-            className="bg-green-500 px-6 py-3 rounded-lg text-white font-semibold hover:bg-green-600 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            Resume
           </button>
         </div>
       </div>
