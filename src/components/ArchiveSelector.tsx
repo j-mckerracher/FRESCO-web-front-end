@@ -34,11 +34,12 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
-          
+
           // Clean up blob URL if it was created
           if (data.isBlob) {
             setTimeout(() => URL.revokeObjectURL(data.url), 1000);
           }
+          setOffset(0);
         } else if (data.type === "ERROR" && selected && data.name === selected.name) {
           console.error("Download error:", data.error);
           alert(`Download failed: ${data.error}`);
