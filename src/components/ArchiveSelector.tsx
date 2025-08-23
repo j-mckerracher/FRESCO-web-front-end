@@ -70,25 +70,50 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
       );
     }
 
+    const failed: string[] = [];
     let completed = 0;
     for (const archive of toDownload) {
-      const downloadUrl = getArchiveDownloadUrl(archive.name);
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = archive.name;
-      link.style.display = "none";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      completed += 1;
-      if (total > 1) {
-        window.dispatchEvent(
-          new CustomEvent("archive-progress", {
-            detail: { current: completed, total },
-          })
-        );
+      const url = getArchiveDownloadUrl(archive.name);
+      let blob: Blob | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          blob = await res.blob();
+          break;
+        } catch (err) {
+          if (attempt === 2) {
+            console.error("Failed to download", archive.name, err);
+            failed.push(archive.name);
+          } else {
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+        }
       }
-      await new Promise((r) => setTimeout(r, 1000));
+
+      if (blob) {
+        const urlObj = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = urlObj;
+        link.download = archive.name;
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(urlObj), 1000);
+        await new Promise((r) => setTimeout(r, 100));
+        completed += 1;
+        if (total > 1) {
+          window.dispatchEvent(
+            new CustomEvent("archive-progress", {
+              detail: { current: completed, total },
+            })
+          );
+        }
+      }
+    }
+    if (failed.length) {
+      alert(`Failed to download: ${failed.join(", ")}`);
     }
   };
 
