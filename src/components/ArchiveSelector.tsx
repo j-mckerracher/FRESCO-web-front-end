@@ -62,18 +62,27 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
   const downloadRange = async () => {
     if (!start || !end) return;
 
-    const months: string[] = [];
+    const archiveMap = new Map(archives.map((a) => [a.name, a]));
+    const toDownload: ArchiveMetadata[] = [];
     const current = new Date(start.getFullYear(), start.getMonth(), 1);
     const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
 
     while (current <= endMonth) {
       const year = current.getFullYear();
       const month = String(current.getMonth() + 1).padStart(2, "0");
-      months.push(`${year}-${month}`);
+      const name = `${year}-${month}.zip`;
+      const archive = archiveMap.get(name);
+      if (archive) {
+        toDownload.push(archive);
+      }
       current.setMonth(current.getMonth() + 1);
     }
 
-    const total = months.length;
+    const total = toDownload.length;
+    if (total === 0) {
+      alert("No archives available in the selected range.");
+      return;
+    }
     if (total > 1) {
       window.dispatchEvent(
         new CustomEvent("archive-progress", { detail: { current: 0, total } })
@@ -81,30 +90,26 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
     }
 
     let completed = 0;
-    for (const m of months) {
-      const archiveName = `${m}.zip`;
-      const archive = archives.find((a) => a.name === archiveName);
-      if (archive) {
-        const downloadUrl = `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(archive.name)}`;
-        const link = document.createElement("a");
-        link.href = downloadUrl;
-        link.download = archive.name;
-        link.target = "_blank";
-        link.style.display = "none";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        completed += 1;
-        if (total > 1) {
-          window.dispatchEvent(
-            new CustomEvent("archive-progress", {
-              detail: { current: completed, total },
-            })
-          );
-        }
-        // Small delay to avoid browsers blocking multiple automatic downloads
-        await new Promise((r) => setTimeout(r, 500));
+    for (const archive of toDownload) {
+      const downloadUrl = `/api/bulk-download/archives/download-archive?name=${encodeURIComponent(archive.name)}`;
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = archive.name;
+      link.target = "_blank";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      completed += 1;
+      if (total > 1) {
+        window.dispatchEvent(
+          new CustomEvent("archive-progress", {
+            detail: { current: completed, total },
+          })
+        );
       }
+      // Small delay to avoid browsers blocking multiple automatic downloads
+      await new Promise((r) => setTimeout(r, 500));
     }
   };
 
