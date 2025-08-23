@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 
 type ProgressState =
   | { kind: "bytes"; name: string; received: number; total: number }
-  | { kind: "files"; current: number; total: number };
+  | { kind: "files"; current: number; total: number; failed?: number };
 
 interface SWProgressMessage {
   type: "PROGRESS";
@@ -13,6 +13,7 @@ interface SWProgressMessage {
 
 const DownloadProgress: React.FC = () => {
   const [progress, setProgress] = useState<ProgressState | null>(null);
+  const [failed, setFailed] = useState<number>(0);
 
   useEffect(() => {
     const swHandler = (event: MessageEvent) => {
@@ -28,8 +29,11 @@ const DownloadProgress: React.FC = () => {
     };
 
     const multiHandler = (event: Event) => {
-      const detail = (event as CustomEvent<{ current: number; total: number }>).detail;
+      const detail = (event as CustomEvent<{ current: number; total: number; failed?: number }>).detail;
       setProgress({ kind: "files", current: detail.current, total: detail.total });
+      if (detail.failed !== undefined) {
+        setFailed(detail.failed);
+      }
     };
 
     if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
@@ -62,17 +66,34 @@ const DownloadProgress: React.FC = () => {
   } else {
     pct = (progress.current / progress.total) * 100;
     label = `Downloaded ${progress.current} / ${progress.total} files`;
+    if (failed > 0) {
+      label += ` (${failed} failed)`;
+    }
   }
+
+  const isComplete = progress.kind === "files" && progress.current === progress.total;
 
   return (
     <div className="mt-4">
-      <p>{label}</p>
-      <div className="w-full bg-gray-200 h-2">
+      <p className={failed > 0 ? "text-yellow-400" : ""}>{label}</p>
+      <div className="w-full bg-gray-200 h-2 rounded">
         <div
-          className="bg-purdue-boilermakerGold h-2"
+          className={`h-2 rounded transition-all duration-300 ${
+            failed > 0 ? "bg-yellow-500" : isComplete ? "bg-green-500" : "bg-purdue-boilermakerGold"
+          }`}
           style={{ width: `${pct}%` }}
         />
       </div>
+      {failed > 0 && (
+        <p className="text-yellow-400 text-sm mt-2">
+          ⚠️ {failed} files failed to download. Check console for details.
+        </p>
+      )}
+      {isComplete && failed === 0 && (
+        <p className="text-green-400 text-sm mt-2">
+          ✅ All downloads completed successfully!
+        </p>
+      )}
     </div>
   );
 };

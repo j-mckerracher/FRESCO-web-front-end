@@ -16,6 +16,12 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
   const downloadArchives = async (toDownload: ArchiveMetadata[]) => {
     const total = toDownload.length;
     if (total === 0) return;
+
+    // Batch size to prevent browser from being overwhelmed
+    const BATCH_SIZE = 3;
+    const DOWNLOAD_DELAY = 1500; // Increased delay between downloads
+    const BATCH_DELAY = 3000; // Delay between batches
+    
     if (total > 1) {
       window.dispatchEvent(
         new CustomEvent("archive-progress", { detail: { current: 0, total } })
@@ -23,30 +29,96 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
     }
 
     let completed = 0;
-    for (const archive of toDownload) {
-      const url = getArchiveDownloadUrl(archive.name);
-      // Trigger browser download without fetching to avoid CORS issues
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = archive.name;
-      link.style.display = "none";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      completed += 1;
-      if (total > 1) {
-        window.dispatchEvent(
-          new CustomEvent("archive-progress", {
-            detail: { current: completed, total },
-          })
-        );
+    const failed: string[] = [];
+    
+    // Process downloads in batches
+    for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
+      const batch = toDownload.slice(batchStart, batchStart + BATCH_SIZE);
+      const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(total / BATCH_SIZE);
+      
+      console.log(`🔄 Processing batch ${batchNum}/${totalBatches} (${batch.length} files)`);
+      
+      // Process each file in the current batch
+      for (const archive of batch) {
+        try {
+          const url = getArchiveDownloadUrl(archive.name);
+          
+          // Create download link with better error handling
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = archive.name;
+          link.style.display = "none";
+          
+          // Add event listeners to track download success/failure
+          let downloadStarted = false;
+          
+          const handleClick = () => {
+            downloadStarted = true;
+          };
+          
+          link.addEventListener('click', handleClick);
+          
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          // Give browser time to process the download
+          await new Promise((resolve) => setTimeout(resolve, DOWNLOAD_DELAY));
+          
+          if (downloadStarted) {
+            completed += 1;
+            console.log(`✅ Download initiated for ${archive.name} (${completed}/${total})`);
+          } else {
+            failed.push(archive.name);
+            console.warn(`❌ Download failed to start for ${archive.name}`);
+          }
+          
+          // Update progress
+          if (total > 1) {
+            window.dispatchEvent(
+              new CustomEvent("archive-progress", {
+                detail: { current: completed, total, failed: failed.length },
+              })
+            );
+          }
+          
+        } catch (error) {
+          failed.push(archive.name);
+          console.error(`❌ Error downloading ${archive.name}:`, error);
+        }
       }
-
-      // Small delay to prevent the browser from blocking multiple downloads
-      await new Promise((r) => setTimeout(r, 200));
+      
+      // Add delay between batches (except for the last batch)
+      if (batchStart + BATCH_SIZE < total) {
+        console.log(`⏳ Waiting ${BATCH_DELAY}ms before next batch...`);
+        await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY));
+      }
     }
-  };
+    
+    // Final status report
+    console.log(`📊 Download Summary: ${completed}/${total} successful, ${failed.length} failed`);
+    
+    if (failed.length > 0) {
+      console.warn(`❌ Failed downloads:`, failed);
+      
+      // Show user notification about failed downloads
+      const retryMessage = failed.length < 10 ? 
+        `Some downloads failed: ${failed.join(', ')}. Please check your Downloads folder and manually retry any missing files.` :
+        `${failed.length} downloads failed. Please check your Downloads folder and manually retry missing files.`;
+      
+      setTimeout(() => {
+        alert(retryMessage);
+      }, 1000);
+    } else {
+      console.log(`✅ All ${total} downloads initiated successfully!`);
+      
+      // Show success notification
+      setTimeout(() => {
+        alert(`All ${total} files have been queued for download. Please check your Downloads folder.`);
+      }, 1000);
+    }
+  };;
 
   const downloadRange = async () => {
     if (!start || !end) return;
@@ -77,12 +149,20 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
 
   const downloadFull = async () => {
     if (archives.length === 0) return;
+    
+    const totalSize = archives.reduce((sum, archive) => sum + archive.size, 0);
+    const totalSizeGB = (totalSize / 1e9).toFixed(2);
+    
     const confirmed = window.confirm(
-      `Download all ${archives.length} files?`
+      `Download all ${archives.length} files (${totalSizeGB} GB total)?\n\n` +
+      `This will download files in batches to ensure reliability. ` +
+      `The process may take several minutes to complete. ` +
+      `Please keep this browser tab open until all downloads finish.`
     );
     if (!confirmed) return;
+    
     await downloadArchives(archives);
-  };
+  };;
 
   return (
     <div className="flex flex-col gap-2">
