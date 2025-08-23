@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import type { ArchiveMetadata } from "../util/archive-client";
@@ -10,56 +10,8 @@ interface Props {
 
 const ArchiveSelector: React.FC<Props> = ({ archives }) => {
   const [selected, setSelected] = useState<ArchiveMetadata | null>(null);
-  const [offset, setOffset] = useState(0);
   const [start, setStart] = useState<Date | null>(null);
   const [end, setEnd] = useState<Date | null>(null);
-
-  type SWMessage =
-    | { type: "PROGRESS"; name: string; received: number }
-    | { type: "DOWNLOAD_READY"; name: string; url: string; isBlob?: boolean }
-    | { type: "ERROR"; name: string; error: string };
-
-  useEffect(() => {
-    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
-      const handler = (event: MessageEvent<SWMessage>) => {
-        const data = event.data;
-        if (data.type === "PROGRESS" && selected && data.name === selected.name) {
-          setOffset(data.received);
-        } else if (data.type === "DOWNLOAD_READY" && selected && data.name === selected.name) {
-          // Trigger browser download
-          const link = document.createElement('a');
-          link.href = data.url;
-          link.download = data.name;
-          link.style.display = 'none';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-
-          // Clean up blob URL if it was created
-          if (data.isBlob) {
-            setTimeout(() => URL.revokeObjectURL(data.url), 1000);
-          }
-          setOffset(0);
-        } else if (data.type === "ERROR" && selected && data.name === selected.name) {
-          console.error("Download error:", data.error);
-          alert(`Download failed: ${data.error}`);
-        }
-      };
-      navigator.serviceWorker.addEventListener("message", handler);
-      return () => navigator.serviceWorker.removeEventListener("message", handler);
-    }
-  }, [selected]);
-
-  const post = (type: string) => {
-    if (!selected) return;
-    navigator.serviceWorker.controller?.postMessage({
-      type,
-      archive: selected,
-      offset,
-      ...(start ? { start: start.toISOString() } : {}),
-      ...(end ? { end: end.toISOString() } : {}),
-    });
-  };
 
   const downloadArchives = async (toDownload: ArchiveMetadata[]) => {
     const total = toDownload.length;
@@ -140,7 +92,6 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
         onChange={(e) => {
           const a = archives.find((x) => x.name === e.target.value) || null;
           setSelected(a);
-          setOffset(0);
         }}
       >
         <option value="">Select archive</option>
@@ -200,20 +151,6 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
             className="bg-blue-500 px-6 py-3 rounded-lg text-white font-semibold hover:bg-blue-600 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             Download Time Range
-          </button>
-          <button
-            onClick={() => post("ABORT")}
-            disabled={!selected}
-            className="bg-gray-500 px-6 py-3 rounded-lg text-white font-semibold hover:bg-gray-600 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            Pause
-          </button>
-          <button
-            onClick={() => post("DOWNLOAD")}
-            disabled={!selected}
-            className="bg-green-500 px-6 py-3 rounded-lg text-white font-semibold hover:bg-green-600 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            Resume
           </button>
         </div>
       </div>
