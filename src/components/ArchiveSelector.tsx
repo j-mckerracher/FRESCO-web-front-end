@@ -61,30 +61,9 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
     });
   };
 
-  const downloadRange = async () => {
-    if (!start || !end) return;
-
-    const archiveMap = new Map(archives.map((a) => [a.name, a]));
-    const toDownload: ArchiveMetadata[] = [];
-    const current = new Date(start.getFullYear(), start.getMonth(), 1);
-    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
-
-    while (current <= endMonth) {
-      const year = current.getFullYear();
-      const month = String(current.getMonth() + 1).padStart(2, "0");
-      const name = `${year}-${month}.zip`;
-      const archive = archiveMap.get(name);
-      if (archive) {
-        toDownload.push(archive);
-      }
-      current.setMonth(current.getMonth() + 1);
-    }
-
+  const downloadArchives = async (toDownload: ArchiveMetadata[]) => {
     const total = toDownload.length;
-    if (total === 0) {
-      alert("No archives available in the selected range.");
-      return;
-    }
+    if (total === 0) return;
     if (total > 1) {
       window.dispatchEvent(
         new CustomEvent("archive-progress", { detail: { current: 0, total } })
@@ -109,19 +88,44 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
           })
         );
       }
-      // Delay to let each download begin before triggering the next
       await new Promise((r) => setTimeout(r, 1000));
     }
   };
 
-  const downloadFull = () => {
-    if (!selected) return;
-    setOffset(0);
-    navigator.serviceWorker.controller?.postMessage({
-      type: "DOWNLOAD",
-      archive: selected,
-      offset: 0,
-    });
+  const downloadRange = async () => {
+    if (!start || !end) return;
+
+    const archiveMap = new Map(archives.map((a) => [a.name, a]));
+    const toDownload: ArchiveMetadata[] = [];
+    const current = new Date(start.getFullYear(), start.getMonth(), 1);
+    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+
+    while (current <= endMonth) {
+      const year = current.getFullYear();
+      const month = String(current.getMonth() + 1).padStart(2, "0");
+      const name = `${year}-${month}.zip`;
+      const archive = archiveMap.get(name);
+      if (archive) {
+        toDownload.push(archive);
+      }
+      current.setMonth(current.getMonth() + 1);
+    }
+
+    if (toDownload.length === 0) {
+      alert("No archives available in the selected range.");
+      return;
+    }
+
+    await downloadArchives(toDownload);
+  };
+
+  const downloadFull = async () => {
+    if (archives.length === 0) return;
+    const confirmed = window.confirm(
+      `Download all ${archives.length} files?`
+    );
+    if (!confirmed) return;
+    await downloadArchives(archives);
   };
 
   return (
@@ -181,7 +185,7 @@ const ArchiveSelector: React.FC<Props> = ({ archives }) => {
         <div className="flex gap-3 flex-wrap">
           <button
             onClick={downloadFull}
-            disabled={!selected}
+            disabled={archives.length === 0}
             className="bg-purdue-boilermakerGold px-6 py-3 rounded-lg text-black font-semibold hover:bg-yellow-500 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             Download Full Archive
