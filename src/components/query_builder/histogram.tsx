@@ -139,7 +139,7 @@ const Histogram: React.FC<HistogramProps> = ({ readyToPlot }) => {
                 );
 
                 // Create brush selection
-                const brushSelection = vg.Selection.intersect();
+                const brushSelection = vg.Selection.intersect("cf");
                 setBrush(brushSelection as BrushValue);
 
                 // Create plot using the view with proper date formatting

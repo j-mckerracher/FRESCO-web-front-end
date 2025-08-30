@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { AsyncDuckDB } from 'duckdb-wasm-kit';
-import { useDuckDb } from 'duckdb-wasm-kit';
-import { AsyncDuckDBConnection } from '@duckdb/duckdb-wasm';
+import * as duckdb from '@duckdb/duckdb-wasm';
+import { AsyncDuckDB, AsyncDuckDBConnection } from '@duckdb/duckdb-wasm';
 
 interface DuckDBContextType {
     db: AsyncDuckDB | null;
@@ -42,8 +41,6 @@ let duckDBInstance: AsyncDuckDB | null = null;
 let connectionInstance: AsyncDuckDBConnection | null = null;
 
 export const DuckDBProvider: React.FC<DuckDBProviderProps> = ({ children }) => {
-    // Use duckDBKit but keep our persistent instance if it exists
-    const duckDBKit = useDuckDb();
 
     // Create state for other variables we need to track
     const [loading, setLoading] = useState(true);
@@ -64,38 +61,41 @@ export const DuckDBProvider: React.FC<DuckDBProviderProps> = ({ children }) => {
                     return;
                 }
 
-                // Wait for duckDBKit to initialize
-                console.log("DuckDBContext: Waiting for duckDBKit, status:",
-                    {loading: duckDBKit.loading, hasDB: !!duckDBKit.db});
+                // Initialize DuckDB with the official package
+                console.log("DuckDBContext: Initializing DuckDB with official package");
+                
+                const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+                const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+                
+                const worker = new Worker(bundle.mainWorker!);
+                const logger = new duckdb.ConsoleLogger();
+                const db = new duckdb.AsyncDuckDB(logger, worker);
+                await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+                
+                duckDBInstance = db;
+                console.log('DuckDBContext: DuckDB initialized successfully');
+                setLoading(false);
 
-                if (!duckDBKit.loading && duckDBKit.db) {
-                    console.log('DuckDBContext: DuckDB initialized successfully');
-                    duckDBInstance = duckDBKit.db;
-                    setLoading(false);
+                // Initialize a reusable connection
+                try {
+                    console.log("DuckDBContext: Creating initial connection");
+                    connectionInstance = await duckDBInstance.connect();
+                    console.log("DuckDBContext: Connection created, setting up environment");
 
-                    // Initialize a reusable connection
-                    try {
-                        console.log("DuckDBContext: Creating initial connection");
-                        connectionInstance = await duckDBInstance.connect();
-                        console.log("DuckDBContext: Connection created, setting up environment");
+                    await connectionInstance.query("LOAD icu");
+                    console.log("DuckDBContext: ICU loaded");
 
-                        await connectionInstance.query("LOAD icu");
-                        console.log("DuckDBContext: ICU loaded");
+                    await connectionInstance.query("SET TimeZone='America/New_York'");
+                    console.log("DuckDBContext: Timezone set");
 
-                        await connectionInstance.query("SET TimeZone='America/New_York'");
-                        console.log("DuckDBContext: Timezone set");
+                    await connectionInstance.query("SET temp_directory='browser-data/tmp'");
+                    console.log("DuckDBContext: Temp directory set");
 
-                        await connectionInstance.query("SET temp_directory='browser-data/tmp'");
-                        console.log("DuckDBContext: Temp directory set");
+                    await connectionInstance.query("PRAGMA memory_limit='20GB'");
+                    console.log("DuckDBContext: Memory limit set");
 
-                        await connectionInstance.query("PRAGMA memory_limit='20GB'");
-                        console.log("DuckDBContext: Memory limit set");
-
-                    } catch (err) {
-                        console.error('DuckDBContext: Initial connection setup error:', err);
-                    }
-                } else {
-                    console.log("DuckDBContext: Still waiting for duckDBKit initialization");
+                } catch (err) {
+                    console.error('DuckDBContext: Initial connection setup error:', err);
                 }
             } catch (err) {
                 console.error('DuckDBContext: Error initializing DuckDB:', err);
@@ -105,7 +105,7 @@ export const DuckDBProvider: React.FC<DuckDBProviderProps> = ({ children }) => {
         };
 
         initDB();
-    }, [duckDBKit.db, duckDBKit.loading]);
+    }, []);
 
     // Cleanup function for when component unmounts
     useEffect(() => {

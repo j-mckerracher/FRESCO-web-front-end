@@ -2,7 +2,7 @@
 import Header from "@/components/Header";
 import Histogram from "@/components/query_builder/histogram";
 import { startSingleQuery } from "@/util/client";
-import { useDuckDb } from "duckdb-wasm-kit";
+import { useDuckDB } from "@/context/DuckDBContext";
 import { useCallback, useEffect, useState } from "react";
 import dynamic from 'next/dynamic';
 import DateRangeSelector from "@/components/query_builder/date_range_selector";
@@ -43,7 +43,7 @@ const DEFAULT_START_DATE = new Date('2023-01-15T00:01:00');
 const DEFAULT_END_DATE = new Date('2023-01-15T23:59:00');
 
 const QueryBuilder = () => {
-    const { db, loading } = useDuckDb();
+    const { db, loading } = useDuckDB();
     const [histogramData, setHistogramData] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [loadingStage, setLoadingStage] = useState(LOADING_STAGES.INITIALIZING.name);

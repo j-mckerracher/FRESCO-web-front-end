@@ -2,7 +2,7 @@
 import * as vg from "@uwdata/vgplot";
 import React from "react";
 import { useCallback, useEffect, useRef } from "react";
-import { AsyncDuckDB } from "duckdb-wasm-kit";
+import { AsyncDuckDB } from "@duckdb/duckdb-wasm";
 import { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 
 interface VGMenuProps {

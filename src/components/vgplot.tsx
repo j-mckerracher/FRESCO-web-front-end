@@ -605,7 +605,7 @@ const VgPlot: React.FC<VgPlotProps> = ({
 
     // Create categorical histogram
     const createCategoricalHistogram = useCallback(async () => {
-        const highlight = vg.Selection.intersect();
+        const highlight = vg.Selection.intersect("cf");
 
         const availableWidth = Math.min(windowWidth * width, 800);
         const pixelsPerCategory = 100;

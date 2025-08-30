@@ -5,7 +5,7 @@
  * and load it into DuckDB for analysis.
  */
 
-import { AsyncDuckDB } from "duckdb-wasm-kit";
+import { AsyncDuckDB } from "@duckdb/duckdb-wasm";
 import { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import { QueryResult, QueryPayload, DataLoadingProgress } from "../types";
 
