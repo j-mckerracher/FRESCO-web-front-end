@@ -2,7 +2,7 @@
  * Line Plot Chart Component
  * 
  * Specialized component for creating time-series line plots with
- * optional percentile-based outlier filtering.
+ * optional percentile-based outlier filtering strategy.
  */
 
 import React from 'react';
