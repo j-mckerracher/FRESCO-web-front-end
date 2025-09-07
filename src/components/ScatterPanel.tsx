@@ -1,74 +1,95 @@
-import React from 'react';
+// src/components/ScatterPanel.tsx
+import React, { useEffect } from 'react';
 import * as vg from '@uwdata/vgplot';
-import { ScatterState } from './ScatterControls';
-
-interface ScatterPanelProps {
-  db: any;
-  table: string;
-  state: ScatterState;
-  width: number;
-  height: number;
-  crossFilterName: string;
-}
+import type { AsyncDuckDB } from '@duckdb/duckdb-wasm';
+import { createOrReplaceView } from '@/lib/duck';
+import type { ScatterState } from '@/components/ScatterControls';
 
 export default function ScatterPanel({
-  db,
-  table,
-  state,
-  width,
-  height,
-  crossFilterName
-}: ScatterPanelProps) {
-  React.useEffect(() => {
-    if (!db || !state.x || !state.y) return;
+  db, table, state, crossFilterName = 'cf',
+  width = 960, height = 260, maxDots = 200_000
+}: {
+  db: AsyncDuckDB;
+  table: string;
+  state: ScatterState;
+  crossFilterName?: string;
+  width?: number;
+  height?: number;
+  maxDots?: number;
+}) {
+  useEffect(() => {
+    const { x, y, color, size, shape, heatmap } = state;
 
-    const mark = state.heatmap 
-      ? vg.rect(
-          vg.from(table),
-          { 
-            x: vg.bin(state.x, { maxbins: 50 }),
-            y: vg.bin(state.y, { maxbins: 50 }),
-            fill: vg.count(),
-            fillOpacity: 0.8
-          }
+    // Build base selection (we rely on Mosaic to inject crossFilter predicates down to the view)
+    const limitClause = heatmap ? '' : `LIMIT ${maxDots}`;
+
+    const sqlDots = `
+      SELECT
+        ${x} AS x,
+        ${y} AS y,
+        ${color ? color : 'NULL'} AS color,
+        ${size ? size : 'NULL'} AS sz,
+        ${shape ? shape : 'NULL'} AS shp
+      FROM ${table}
+      WHERE x IS NOT NULL AND y IS NOT NULL
+      ${limitClause};
+    `;
+
+    const sqlBins = `
+      WITH ext AS (
+        SELECT
+          MIN(${x}) AS xmin, MAX(${x}) AS xmax,
+          MIN(${y}) AS ymin, MAX(${y}) AS ymax
+        FROM ${table}
+      ),
+      bins AS (
+        SELECT
+          width_bucket(${x}, xmin, xmax, 80) AS bx,
+          width_bucket(${y}, ymin, ymax, 80) AS by,
+          COUNT(*) AS c
+        FROM ${table}, ext
+        WHERE ${x} IS NOT NULL AND ${y} IS NOT NULL
+        GROUP BY 1,2
+      )
+      SELECT bx, by, c FROM bins;
+    `;
+
+    createOrReplaceView(db, 'scatter_dots', sqlDots);
+    createOrReplaceView(db, 'scatter_bins', sqlBins);
+  }, [db, table, state]);
+
+  useEffect(() => {
+    const { color, size, shape, heatmap } = state;
+
+    const plot = heatmap
+      ? vg.plot(
+          vg.heatmap(vg.from('scatter_bins'), { x: 'bx', y: 'by', fill: 'c' }),
+          vg.intervalXY({ as: crossFilterName }),
+          vg.width(width),
+          vg.height(height),
+          vg.margins(24, 28, 28, 18),
         )
-      : vg.dot(
-          vg.from(table),
-          { 
-            x: state.x,
-            y: state.y,
-            fill: state.color || undefined,
-            size: state.size || undefined,
-            shape: state.shape || undefined,
-            fillOpacity: 0.7
-          }
+      : vg.plot(
+          vg.dot(vg.from('scatter_dots'), {
+            x: 'x',
+            y: 'y',
+            fill: color ? 'color' : undefined,
+            r: size ? { channel: 'sz', range: [2, 6] } : 3,
+            symbol: shape ? 'shp' : undefined,
+            tip: true
+          }),
+          vg.intervalXY({ as: crossFilterName }),
+          vg.highlight({ of: crossFilterName }),
+          color ? vg.colorLegend() : undefined,
+          vg.width(width),
+          vg.height(height),
+          vg.margins(24, 28, 28, 18)
         );
 
-    const plot = vg.plot(
-      mark,
-      {
-        width,
-        height,
-        x: { grid: true },
-        y: { grid: true },
-        color: state.color ? { domain: 'auto' } : undefined,
-        marks: [
-          vg.ruleY([0], { stroke: '#999', strokeOpacity: 0.5 }),
-          vg.ruleX([0], { stroke: '#999', strokeOpacity: 0.5 })
-        ]
-      }
-    );
+    const el = document.getElementById('scatter-panel');
+    if (el) el.replaceChildren(plot);
+    return () => plot?.remove?.();
+  }, [state, width, height, crossFilterName]);
 
-    const container = document.getElementById('scatter-panel');
-    if (container) {
-      container.innerHTML = '';
-      container.appendChild(plot);
-    }
-  }, [db, table, state, width, height]);
-
-  return (
-    <div className="bg-white border rounded p-4">
-      <div id="scatter-panel" style={{ width, height }} />
-    </div>
-  );
+  return <div id="scatter-panel" className="rounded border bg-white" />;
 }

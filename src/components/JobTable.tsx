@@ -1,155 +1,96 @@
-import React, { useState, useEffect } from 'react';
+// src/components/JobTable.tsx
+import React, { useEffect, useState } from 'react';
+import type { AsyncDuckDB } from '@duckdb/duckdb-wasm';
+import { getConn } from '@/lib/duck';
 
-interface JobTableProps {
-  db: any;
+type JobRow = {
+  jid: string;
+  username: string | null;
+  queue: string | null;
+  exitcode: string | null;
+  nhosts: number | null;
+  ncores: number | null;
+  timelimit: number | null;
+  start_t: string;
+  end_t: string;
+  cpu_avg: number | null;
+  mem_max: number | null;
+};
+
+export default function JobTable({
+  db, table, limit = 1000
+}: {
+  db: AsyncDuckDB;
   table: string;
-}
-
-interface JobData {
-  id: string;
-  timestamp: string;
-  username: string;
-  cluster: string;
-  queue: string;
-  exit_state: string;
-  exitcode: string;
-  value_cpuuser: number;
-  value_memused: number;
-  value_gpu: number;
-}
-
-export default function JobTable({ db, table }: JobTableProps) {
-  const [jobs, setJobs] = useState<JobData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  limit?: number;
+}) {
+  const [rows, setRows] = useState<JobRow[]>([]);
 
   useEffect(() => {
-    if (!db) return;
-
-    const fetchJobs = async () => {
+    (async () => {
+      const conn = await getConn(db);
       try {
-        setLoading(true);
-        const conn = await db.connect();
-        
-        try {
-          const result = await conn.query(`
-            SELECT 
-              id, timestamp, username, cluster, queue, exit_state, exitcode,
-              value_cpuuser, value_memused, value_gpu
-            FROM ${table}
-            ORDER BY timestamp DESC
-            LIMIT 100
-          `);
-          
-          const rows = result.toArray();
-          setJobs(rows);
-        } finally {
-          await conn.close();
+        const q = await conn.query(`
+          SELECT
+            jid::VARCHAR AS jid,
+            username,
+            queue,
+            exitcode,
+            nhosts,
+            ncores,
+            timelimit,
+            MIN(time) AS start_t,
+            MAX(time) AS end_t,
+            AVG(value_cpuuser) AS cpu_avg,
+            MAX(value_memused) AS mem_max
+          FROM ${table}
+          GROUP BY 1,2,3,4,5,6,7
+          ORDER BY end_t DESC
+          LIMIT ${limit};
+        `);
+        const data: JobRow[] = [];
+        for (let i = 0; i < q.rows; i++) {
+          const r: any = {};
+          for (const c of q.schema.fields) {
+            r[c.name] = q.get(c.name, i);
+          }
+          data.push(r as JobRow);
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch jobs');
+        setRows(data);
       } finally {
-        setLoading(false);
+        await conn.close();
       }
-    };
-
-    fetchJobs();
-  }, [db, table]);
-
-  if (loading) {
-    return (
-      <div className="bg-white border rounded p-4">
-        <div className="flex items-center justify-center h-32">
-          <div className="text-gray-500">Loading jobs...</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-white border rounded p-4">
-        <div className="text-red-500">Error: {error}</div>
-      </div>
-    );
-  }
+    })();
+  }, [db, table, limit]);
 
   return (
-    <div className="bg-white border rounded overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                ID
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Timestamp
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Username
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Cluster
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Queue
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Exit State
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                CPU User
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Memory Used
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {jobs.map((job) => (
-              <tr key={job.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
-                  {job.id}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {new Date(job.timestamp).toLocaleString()}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {job.username}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {job.cluster}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {job.queue}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                    job.exit_state === 'COMPLETED' 
-                      ? 'bg-green-100 text-green-800' 
-                      : 'bg-red-100 text-red-800'
-                  }`}>
-                    {job.exit_state}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {job.value_cpuuser?.toFixed(2) || 'N/A'}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {job.value_memused?.toFixed(2) || 'N/A'}
-                </td>
-              </tr>
+    <div className="rounded border bg-white overflow-auto">
+      <table className="min-w-full text-sm">
+        <thead className="sticky top-0 bg-gray-50">
+          <tr>
+            {['jid', 'username', 'queue', 'exitcode', 'nhosts', 'ncores', 'timelimit', 'start_t', 'end_t', 'cpu_avg', 'mem_max'].map(h => (
+              <th key={h} className="text-left px-3 py-2 font-semibold">{h}</th>
             ))}
-          </tbody>
-        </table>
-      </div>
-      
-      {jobs.length === 0 && (
-        <div className="text-center py-8 text-gray-500">
-          No jobs found
-        </div>
-      )}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className="border-t">
+              <td className="px-3 py-2 font-mono">{r.jid}</td>
+              <td className="px-3 py-2">{r.username ?? ''}</td>
+              <td className="px-3 py-2">{r.queue ?? ''}</td>
+              <td className="px-3 py-2">{r.exitcode ?? ''}</td>
+              <td className="px-3 py-2">{r.nhosts ?? ''}</td>
+              <td className="px-3 py-2">{r.ncores ?? ''}</td>
+              <td className="px-3 py-2">{r.timelimit ?? ''}</td>
+              <td className="px-3 py-2">{r.start_t}</td>
+              <td className="px-3 py-2">{r.end_t}</td>
+              <td className="px-3 py-2">{r.cpu_avg?.toFixed(2) ?? ''}</td>
+              <td className="px-3 py-2">{r.mem_max?.toFixed(2) ?? ''}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

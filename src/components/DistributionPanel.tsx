@@ -1,57 +1,52 @@
-import React from 'react';
+// src/components/DistributionPanel.tsx
+import React, { useEffect } from 'react';
 import * as vg from '@uwdata/vgplot';
-
-interface DistributionPanelProps {
-  db: any;
-  table: string;
-  metric: string;
-  width: number;
-  height: number;
-  crossFilterName: string;
-}
+import type { AsyncDuckDB } from '@duckdb/duckdb-wasm';
+import { createOrReplaceView } from '@/lib/duck';
 
 export default function DistributionPanel({
-  db,
-  table,
-  metric,
-  width,
-  height,
-  crossFilterName
-}: DistributionPanelProps) {
-  React.useEffect(() => {
-    if (!db || !metric) return;
+  db, table, metric, bins = 60, crossFilterName = 'cf',
+  width = 960, height = 160
+}: {
+  db: AsyncDuckDB;
+  table: string;
+  metric: string;
+  bins?: number;
+  crossFilterName?: string;
+  width?: number;
+  height?: number;
+}) {
+  useEffect(() => {
+    if (!metric) return;
 
-    const plot = vg.plot(
-      vg.rectY(
-        vg.from(table),
-        { 
-          x: vg.bin(metric, { maxbins: 50 }),
-          y: vg.count(),
-          fill: 'steelblue',
-          fillOpacity: 0.8
-        }
+    const sql = `
+      WITH ext AS (
+        SELECT MIN(${metric}) AS lo, MAX(${metric}) AS hi FROM ${table}
       ),
-      {
-        width,
-        height,
-        x: { grid: true, title: metric },
-        y: { grid: true, title: 'Count' },
-        marks: [
-          vg.ruleY([0], { stroke: '#999', strokeOpacity: 0.5 })
-        ]
-      }
+      hist AS (
+        SELECT width_bucket(${metric}, lo, hi, ${bins}) AS b, COUNT(*) AS c
+        FROM ${table}, ext
+        WHERE ${metric} IS NOT NULL
+        GROUP BY 1
+      )
+      SELECT b, c FROM hist ORDER BY b;
+    `;
+    createOrReplaceView(db, 'metric_hist', sql);
+  }, [db, table, metric, bins]);
+
+  useEffect(() => {
+    if (!metric) return;
+    const p = vg.plot(
+      vg.barY(vg.from('metric_hist'), { x: 'b', y: 'c' }),
+      vg.intervalX({ as: crossFilterName }),
+      vg.width(width),
+      vg.height(height),
+      vg.margins(24, 16, 18, 8),
     );
+    const el = document.getElementById('dist-panel');
+    if (el) el.replaceChildren(p);
+    return () => p?.remove?.();
+  }, [metric, width, height, crossFilterName]);
 
-    const container = document.getElementById('distribution-panel');
-    if (container) {
-      container.innerHTML = '';
-      container.appendChild(plot);
-    }
-  }, [db, table, metric, width, height]);
-
-  return (
-    <div className="bg-white border rounded p-4">
-      <div id="distribution-panel" style={{ width, height }} />
-    </div>
-  );
+  return <div id="dist-panel" className="rounded border bg-white" />;
 }

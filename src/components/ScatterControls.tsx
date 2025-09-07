@@ -1,115 +1,62 @@
+// src/components/ScatterControls.tsx
 import React from 'react';
 
-export interface ScatterState {
+export type ScatterState = {
   x: string;
   y: string;
-  color: string;
-  size: string | undefined;
-  shape: string | undefined;
+  color?: string;
+  size?: string;
+  shape?: string;
   heatmap: boolean;
-}
-
-interface ScatterControlsProps {
-  numericFields: string[];
-  categoricalFields: string[];
-  state: ScatterState;
-  onChange: (state: ScatterState) => void;
-}
+};
 
 export default function ScatterControls({
   numericFields,
   categoricalFields,
   state,
   onChange
-}: ScatterControlsProps) {
-  const handleFieldChange = (field: keyof ScatterState, value: string | undefined | boolean) => {
-    onChange({ ...state, [field]: value });
-  };
+}: {
+  numericFields: string[];
+  categoricalFields: string[];
+  state: ScatterState;
+  onChange(s: ScatterState): void;
+}) {
+  const set = (k: keyof ScatterState, v: any) => onChange({ ...state, [k]: v });
 
   return (
-    <div className="bg-white p-4 rounded border">
-      <h3 className="text-sm font-semibold mb-3">Scatter Plot Controls</h3>
-      
-      <div className="space-y-3">
-        <div>
-          <label className="block text-xs font-medium mb-1">X Axis</label>
-          <select
-            value={state.x}
-            onChange={(e) => handleFieldChange('x', e.target.value)}
-            className="w-full text-sm border rounded px-2 py-1"
-          >
-            {numericFields.map(field => (
-              <option key={field} value={field}>{field}</option>
-            ))}
+    <div className="space-y-2">
+      <div className="font-semibold">Scatter</div>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <label className="flex flex-col">
+          <span>X</span>
+          <select value={state.x} onChange={e => set('x', e.target.value)} className="border rounded px-2 py-1">
+            {numericFields.map(f => <option key={f}>{f}</option>)}
           </select>
-        </div>
-        
-        <div>
-          <label className="block text-xs font-medium mb-1">Y Axis</label>
-          <select
-            value={state.y}
-            onChange={(e) => handleFieldChange('y', e.target.value)}
-            className="w-full text-sm border rounded px-2 py-1"
-          >
-            {numericFields.map(field => (
-              <option key={field} value={field}>{field}</option>
-            ))}
+        </label>
+        <label className="flex flex-col">
+          <span>Y</span>
+          <select value={state.y} onChange={e => set('y', e.target.value)} className="border rounded px-2 py-1">
+            {numericFields.map(f => <option key={f}>{f}</option>)}
           </select>
-        </div>
-        
-        <div>
-          <label className="block text-xs font-medium mb-1">Color By</label>
-          <select
-            value={state.color}
-            onChange={(e) => handleFieldChange('color', e.target.value)}
-            className="w-full text-sm border rounded px-2 py-1"
-          >
-            <option value="">None</option>
-            {categoricalFields.map(field => (
-              <option key={field} value={field}>{field}</option>
-            ))}
+        </label>
+        <label className="flex flex-col">
+          <span>Color (categorical)</span>
+          <select value={state.color ?? ''} onChange={e => set('color', e.target.value || undefined)} className="border rounded px-2 py-1">
+            <option value="">(none)</option>
+            {categoricalFields.map(f => <option key={f}>{f}</option>)}
           </select>
-        </div>
-        
-        <div>
-          <label className="block text-xs font-medium mb-1">Size By</label>
-          <select
-            value={state.size || ''}
-            onChange={(e) => handleFieldChange('size', e.target.value || undefined)}
-            className="w-full text-sm border rounded px-2 py-1"
-          >
-            <option value="">None</option>
-            {numericFields.map(field => (
-              <option key={field} value={field}>{field}</option>
-            ))}
+        </label>
+        <label className="flex flex-col">
+          <span>Size (numeric)</span>
+          <select value={state.size ?? ''} onChange={e => set('size', e.target.value || undefined)} className="border rounded px-2 py-1">
+            <option value="">(none)</option>
+            {numericFields.map(f => <option key={f}>{f}</option>)}
           </select>
-        </div>
-        
-        <div>
-          <label className="block text-xs font-medium mb-1">Shape By</label>
-          <select
-            value={state.shape || ''}
-            onChange={(e) => handleFieldChange('shape', e.target.value || undefined)}
-            className="w-full text-sm border rounded px-2 py-1"
-          >
-            <option value="">None</option>
-            {categoricalFields.map(field => (
-              <option key={field} value={field}>{field}</option>
-            ))}
-          </select>
-        </div>
-        
-        <div>
-          <label className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              checked={state.heatmap}
-              onChange={(e) => handleFieldChange('heatmap', e.target.checked)}
-              className="rounded"
-            />
-            <span className="text-sm">Show as heatmap</span>
-          </label>
-        </div>
+        </label>
+        <label className="flex items-center gap-2 col-span-2">
+          <input type="checkbox" checked={state.heatmap} onChange={e => set('heatmap', e.target.checked)} />
+          Use heatmap (2D bins) when dense
+        </label>
       </div>
     </div>
   );

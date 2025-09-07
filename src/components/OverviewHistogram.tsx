@@ -1,61 +1,65 @@
-import React from 'react';
+// src/components/OverviewHistogram.tsx
+import React, { useEffect } from 'react';
 import * as vg from '@uwdata/vgplot';
-
-interface OverviewHistogramProps {
-  db: any;
-  table: string;
-  start: Date;
-  end: Date;
-  width: number;
-  height: number;
-  crossFilterName: string;
-}
+import { timeResolution, truncExpr } from '@/lib/duck';
+import { useDebouncedQuery, useSelectionHash, useCacheInvalidation } from '@/hooks/useDebouncedQuery';
+import type { AsyncDuckDB } from '@duckdb/duckdb-wasm';
 
 export default function OverviewHistogram({
-  db,
-  table,
-  start,
-  end,
-  width,
-  height,
-  crossFilterName
-}: OverviewHistogramProps) {
-  React.useEffect(() => {
-    if (!db) return;
+  db, table, start, end, width = 960, height = 120, crossFilterName = 'cf'
+}: {
+  db: AsyncDuckDB;
+  table: string;     // base view/table name (already filtered to selected clusters, etc.)
+  start: Date;
+  end: Date;
+  width?: number;
+  height?: number;
+  crossFilterName?: string; // the Mosaic selection id you've created
+}) {
+  // Get selection hash for cache invalidation
+  const selectionHash = useSelectionHash(null); // We'll connect this to actual crossfilter state later
+  useCacheInvalidation(selectionHash);
 
-    const plot = vg.plot(
-      vg.rectY(
-        vg.from(table, { 
-          filter: `timestamp >= '${start.toISOString()}' AND timestamp <= '${end.toISOString()}'` 
-        }),
-        { 
-          x: vg.bin('timestamp', { maxbins: 50 }),
-          y: vg.count(),
-          fill: 'steelblue',
-          fillOpacity: 0.8
-        }
-      ),
-      {
-        width,
-        height,
-        x: { grid: true },
-        y: { grid: true },
-        marks: [
-          vg.ruleY([0], { stroke: '#999', strokeOpacity: 0.5 })
-        ]
-      }
-    );
+  // Progressive resolution: choose appropriate time bucketing
+  const res = timeResolution(start, end);
+  const tcol = truncExpr(res, 'time');
 
-    const container = document.getElementById('overview-histogram');
-    if (container) {
-      container.innerHTML = '';
-      container.appendChild(plot);
-    }
-  }, [db, table, start, end, width, height]);
+  const sql = `
+    WITH binned AS (
+      SELECT ${tcol} AS t_bin, COUNT(*) AS c
+      FROM ${table}
+      GROUP BY 1
+    )
+    SELECT * FROM binned ORDER BY t_bin;
+  `;
 
-  return (
-    <div className="bg-white border rounded p-4">
-      <div id="overview-histogram" style={{ width, height }} />
-    </div>
+  // Use debounced query with 200ms delay for selection/zoom changes
+  useDebouncedQuery(
+    db,
+    'overview_hist',
+    sql,
+    [table, start, end], // Dependencies that trigger re-query
+    {}, // No additional params
+    selectionHash,
+    200 // 200ms debounce
   );
+
+  useEffect(() => {
+    const plot = vg.plot(
+      vg.rectY(vg.from('overview_hist'), { x: 't_bin', y: 'c' }),
+      vg.xDomain(vg.Fixed),
+      vg.intervalX({ as: crossFilterName }),
+      vg.panZoomX({ as: crossFilterName }),
+      vg.width(width),
+      vg.height(height),
+      vg.margins(24, 8, 18, 8)
+    );
+    const el = document.getElementById('overview-hist');
+    if (el) {
+      el.replaceChildren(plot);
+    }
+    return () => plot?.remove?.();
+  }, [start, end, width, height, crossFilterName]);
+
+  return <div id="overview-hist" className="rounded border bg-white" />;
 }

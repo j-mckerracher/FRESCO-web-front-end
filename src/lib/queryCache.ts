@@ -1,52 +1,83 @@
-interface CacheEntry {
-  data: any;
-  timestamp: number;
-  ttl: number;
-}
+import { AsyncDuckDB } from '@duckdb/duckdb-wasm';
+import { createOrReplaceView } from './duck';
 
+/**
+ * Simple in-memory cache for DuckDB query results
+ * Keyed by sql+params+selectionHash for cache invalidation on filter changes
+ */
 class QueryCache {
-  private cache = new Map<string, CacheEntry>();
-  private defaultTTL = 5 * 60 * 1000; // 5 minutes
+  private cache = new Map<string, { result: any; timestamp: number }>();
+  private maxSize = 100; // Limit cache size
+  private ttl = 5 * 60 * 1000; // 5 minutes TTL
 
-  set(key: string, data: any, ttl?: number): void {
+  private generateKey(sql: string, params: Record<string, unknown> = {}, selectionHash = ''): string {
+    return `${sql}:${JSON.stringify(params)}:${selectionHash}`;
+  }
+
+  set(sql: string, result: any, params: Record<string, unknown> = {}, selectionHash = ''): void {
+    const key = this.generateKey(sql, params, selectionHash);
+    
+    // Remove oldest entries if cache is full
+    if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
+    
     this.cache.set(key, {
-      data,
-      timestamp: Date.now(),
-      ttl: ttl || this.defaultTTL
+      result,
+      timestamp: Date.now()
     });
   }
 
-  get(key: string): any | null {
+  get(sql: string, params: Record<string, unknown> = {}, selectionHash = ''): any | null {
+    const key = this.generateKey(sql, params, selectionHash);
     const entry = this.cache.get(key);
+    
     if (!entry) return null;
-
-    if (Date.now() - entry.timestamp > entry.ttl) {
+    
+    // Check TTL
+    if (Date.now() - entry.timestamp > this.ttl) {
       this.cache.delete(key);
       return null;
     }
-
-    return entry.data;
-  }
-
-  has(key: string): boolean {
-    return this.cache.has(key);
-  }
-
-  delete(key: string): boolean {
-    return this.cache.delete(key);
+    
+    return entry.result;
   }
 
   clear(): void {
     this.cache.clear();
   }
 
-  size(): number {
-    return this.cache.size;
-  }
-
-  keys(): string[] {
-    return Array.from(this.cache.keys());
+  // Invalidate all entries with a specific selectionHash
+  invalidateSelection(selectionHash: string): void {
+    for (const [key, _] of this.cache) {
+      if (key.endsWith(`:${selectionHash}`)) {
+        this.cache.delete(key);
+      }
+    }
   }
 }
 
 export const queryCache = new QueryCache();
+
+/**
+ * Cached version of createOrReplaceView with memo support
+ */
+export async function createOrReplaceViewCached(
+  db: AsyncDuckDB,
+  viewName: string,
+  sql: string,
+  params: Record<string, unknown> = {},
+  selectionHash = ''
+): Promise<void> {
+  const cached = queryCache.get(sql, params, selectionHash);
+  if (cached) {
+    console.log(`Cache hit for view ${viewName}`);
+    return cached;
+  }
+
+  console.log(`Cache miss for view ${viewName}, executing query`);
+  const result = await createOrReplaceView(db, viewName, sql, params);
+  queryCache.set(sql, result, params, selectionHash);
+  return result;
+}
