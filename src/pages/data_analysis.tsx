@@ -90,6 +90,177 @@ export default function DataAnalysisPage() {
   // Derived width (simple, you probably use a ResizeObserver)
   const plotWidth = 980;
 
+  // ===== URL STATE SYNC =====
+  
+  // Serialize current dashboard state to URL parameters
+  const serializeState = useMemo(() => {
+    return {
+      metrics: overlayMetrics,
+      axisMode,
+      overlayMode,
+      anomaly,
+      scatter,
+      showScatterMatrix,
+      showParallelCoords,
+      // Add selection bounds when available
+      start: start.toISOString(),
+      end: end.toISOString()
+    };
+  }, [overlayMetrics, axisMode, overlayMode, anomaly, scatter, showScatterMatrix, showParallelCoords, start, end]);
+
+  // Update URL when state changes (debounced to avoid excessive updates)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams();
+      
+      // Serialize each state piece
+      params.set('metrics', JSON.stringify(overlayMetrics));
+      params.set('axisMode', axisMode);
+      params.set('overlayMode', overlayMode);
+      params.set('anomaly', JSON.stringify(anomaly));
+      params.set('scatter', JSON.stringify(scatter));
+      params.set('showScatterMatrix', showScatterMatrix.toString());
+      params.set('showParallelCoords', showParallelCoords.toString());
+      params.set('start', start.toISOString());
+      params.set('end', end.toISOString());
+
+      // Update URL without causing page reload
+      const newUrl = `${window.location.pathname}?${params.toString()}`;
+      window.history.replaceState({}, '', newUrl);
+      
+    }, 500); // 500ms debounce to avoid excessive URL updates
+
+    return () => clearTimeout(timer);
+  }, [overlayMetrics, axisMode, overlayMode, anomaly, scatter, showScatterMatrix, showParallelCoords, start, end]);
+
+  // Parse and restore state from URL on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    
+    try {
+      // Restore metrics
+      const metricsParam = params.get('metrics');
+      if (metricsParam) {
+        const metrics = JSON.parse(metricsParam);
+        if (Array.isArray(metrics)) {
+          setOverlayMetrics(metrics);
+        }
+      }
+
+      // Restore axis mode
+      const axisModeParam = params.get('axisMode');
+      if (axisModeParam === 'dual' || axisModeParam === 'normalize') {
+        setAxisMode(axisModeParam);
+      }
+
+      // Restore overlay mode
+      const overlayModeParam = params.get('overlayMode');
+      if (overlayModeParam === 'overlay' || overlayModeParam === 'small_multiples') {
+        setOverlayMode(overlayModeParam);
+      }
+
+      // Restore anomaly state
+      const anomalyParam = params.get('anomaly');
+      if (anomalyParam) {
+        const anomalyState = JSON.parse(anomalyParam);
+        if (typeof anomalyState === 'object' && anomalyState !== null) {
+          setAnomaly(prev => ({ ...prev, ...anomalyState }));
+        }
+      }
+
+      // Restore scatter state
+      const scatterParam = params.get('scatter');
+      if (scatterParam) {
+        const scatterState = JSON.parse(scatterParam);
+        if (typeof scatterState === 'object' && scatterState !== null) {
+          setScatter(prev => ({ ...prev, ...scatterState }));
+        }
+      }
+
+      // Restore toggles
+      const showScatterMatrixParam = params.get('showScatterMatrix');
+      if (showScatterMatrixParam === 'true') {
+        setShowScatterMatrix(true);
+      }
+
+      const showParallelCoordsParam = params.get('showParallelCoords');
+      if (showParallelCoordsParam === 'true') {
+        setShowParallelCoords(true);
+      }
+
+      // Restore time range
+      const startParam = params.get('start');
+      const endParam = params.get('end');
+      if (startParam) {
+        try {
+          setStart(new Date(startParam));
+        } catch (e) {
+          console.warn('Invalid start date in URL:', startParam);
+        }
+      }
+      if (endParam) {
+        try {
+          setEnd(new Date(endParam));
+        } catch (e) {
+          console.warn('Invalid end date in URL:', endParam);
+        }
+      }
+
+      console.log('🔗 Dashboard state restored from URL');
+    } catch (error) {
+      console.error('Error parsing URL state:', error);
+    }
+  }, []); // Only run on mount
+
+  // Share view functionality
+  const [shareLoading, setShareLoading] = useState(false);
+  
+  const handleShareView = async () => {
+    setShareLoading(true);
+    try {
+      const currentUrl = window.location.href;
+      
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(currentUrl);
+        console.log('📋 URL copied to clipboard');
+        
+        // Show temporary success feedback
+        const originalText = 'Share View';
+        const button = document.querySelector('[data-share-button]') as HTMLButtonElement;
+        if (button) {
+          button.textContent = 'Copied!';
+          button.classList.add('bg-green-100', 'text-green-800');
+          
+          setTimeout(() => {
+            button.textContent = originalText;
+            button.classList.remove('bg-green-100', 'text-green-800');
+          }, 2000);
+        }
+      } else {
+        // Fallback for browsers without clipboard API
+        const textArea = document.createElement('textarea');
+        textArea.value = currentUrl;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        console.log('📋 URL copied to clipboard (fallback)');
+      }
+    } catch (error) {
+      console.error('Failed to copy URL:', error);
+      // Show error feedback
+      const button = document.querySelector('[data-share-button]') as HTMLButtonElement;
+      if (button) {
+        button.textContent = 'Failed';
+        setTimeout(() => {
+          button.textContent = 'Share View';
+        }, 2000);
+      }
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
   // Filter chips (optional; depends on how you expose Mosaic clauses)
   const chips = useMemo(() => {
     // Pseudo: if your crossFilter exposes a method to enumerate clauses, map them to user-friendly labels here.
@@ -448,18 +619,34 @@ export default function DataAnalysisPage() {
         <section className="space-y-2">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Jobs (filtered)</h2>
-            {/* Hook your current CSV export here; make sure it applies the current crossFilter */}
-            <button 
-              onClick={handleExportCSV}
-              disabled={exportLoading}
-              className={`px-3 py-1 rounded text-sm ${
-                exportLoading 
-                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
-                  : 'bg-black text-white hover:bg-gray-800'
-              }`}
-            >
-              {exportLoading ? 'Exporting...' : 'Export CSV'}
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Share View Button */}
+              <button 
+                data-share-button
+                onClick={handleShareView}
+                disabled={shareLoading}
+                className={`px-3 py-1 rounded text-sm ${
+                  shareLoading 
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
+              >
+                {shareLoading ? 'Copying...' : 'Share View'}
+              </button>
+              
+              {/* Export CSV Button */}
+              <button 
+                onClick={handleExportCSV}
+                disabled={exportLoading}
+                className={`px-3 py-1 rounded text-sm ${
+                  exportLoading 
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                    : 'bg-black text-white hover:bg-gray-800'
+                }`}
+              >
+                {exportLoading ? 'Exporting...' : 'Export CSV'}
+              </button>
+            </div>
           </div>
           <JobTable db={db} table={tableName} />
         </section>
