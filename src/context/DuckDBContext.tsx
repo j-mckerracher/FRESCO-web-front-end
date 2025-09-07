@@ -64,8 +64,26 @@ export const DuckDBProvider: React.FC<DuckDBProviderProps> = ({ children }) => {
                 // Initialize DuckDB with the official package
                 console.log("DuckDBContext: Initializing DuckDB with official package");
                 
-                const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
-                const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+                // Use unpkg CDN for better CORS support in production
+                let bundle;
+                try {
+                    console.log("DuckDBContext: Using unpkg CDN for better production compatibility");
+                    
+                    // Manual bundle configuration using unpkg URLs (better CORS than jsdelivr)
+                    const version = '1.29.0'; // Match the installed version
+                    bundle = {
+                        mainModule: `https://unpkg.com/@duckdb/duckdb-wasm@${version}/dist/duckdb-browser-eh.wasm`,
+                        mainWorker: `https://unpkg.com/@duckdb/duckdb-wasm@${version}/dist/duckdb-browser-eh.worker.js`,
+                        pthreadWorker: `https://unpkg.com/@duckdb/duckdb-wasm@${version}/dist/duckdb-browser-coi.pthread.worker.js`
+                    };
+                    
+                    console.log("DuckDBContext: Using unpkg bundle configuration");
+                } catch (unpkgError) {
+                    console.warn("DuckDBContext: unpkg config failed, falling back to jsdelivr:", unpkgError);
+                    const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+                    bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+                    console.log("DuckDBContext: Using jsdelivr bundles (may cause CORS issues in production)");
+                }
                 
                 const worker = new Worker(bundle.mainWorker!);
                 const logger = new duckdb.ConsoleLogger();
