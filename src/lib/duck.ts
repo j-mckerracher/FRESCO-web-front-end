@@ -1,8 +1,13 @@
 // src/lib/duck.ts
 import type { AsyncDuckDB, AsyncDuckDBConnection } from '@duckdb/duckdb-wasm';
+import { connectionManager } from '@/util/connectionManager';
 
 export async function getConn(db: AsyncDuckDB): Promise<AsyncDuckDBConnection> {
-  const conn = await db.connect();
+  // Use connection manager instead of creating new connections
+  const conn = await connectionManager.getConnection();
+  if (!conn) {
+    throw new Error('Failed to get database connection');
+  }
   return conn;
 }
 
@@ -12,7 +17,6 @@ export async function createOrReplaceView(
   sql: string,
   params?: Record<string, unknown>
 ): Promise<void> {
-  const conn = await getConn(db);
   try {
     // Optional paramization for clarity (simple string replace here; adopt prepared stmts if you prefer)
     let stmt = sql;
@@ -22,10 +26,15 @@ export async function createOrReplaceView(
         stmt = stmt.replaceAll(`:${k}`, val);
       }
     }
-    await conn.query(`DROP VIEW IF EXISTS ${viewName};`);
-    await conn.query(`CREATE VIEW ${viewName} AS ${stmt};`);
-  } finally {
-    await conn.close();
+
+    // Use connection manager to execute queries with automatic retry
+    await connectionManager.executeQuery(`DROP VIEW IF EXISTS ${viewName};`);
+    await connectionManager.executeQuery(`CREATE VIEW ${viewName} AS ${stmt};`);
+
+    console.log(`Successfully created view: ${viewName}`);
+  } catch (error) {
+    console.error(`Failed to create view ${viewName}:`, error);
+    throw error;
   }
 }
 

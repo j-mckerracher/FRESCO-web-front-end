@@ -35,9 +35,11 @@ import JobTable from '@/components/JobTable';
 import ScatterMatrix from '@/components/ScatterMatrix';
 import ParallelCoords from '@/components/ParallelCoords';
 import Header from '@/components/Header';
+import DatabaseErrorBoundary from '@/components/DatabaseErrorBoundary';
 import * as vg from '@uwdata/vgplot';
 import { exportFilteredDataAsCSV } from '@/util/export';
 import { queryCache } from '@/lib/queryCache';
+import { connectionManager } from '@/util/connectionManager';
 
 // ——— your dataset schema ———
 // Numeric metrics suitable for lines/scatter:
@@ -86,6 +88,11 @@ export default function DataAnalysisPage() {
 
   // Parallel coordinates toggle state
   const [showParallelCoords, setShowParallelCoords] = useState(false);
+  // Database error handling state
+  const [dbError, setDbError] = useState<string | null>(null);
+  const [dbRetryCount, setDbRetryCount] = useState(0);
+  const [isRecovering, setIsRecovering] = useState(false);
+  const maxRetries = 3;
 
   // Derived width (simple, you probably use a ResizeObserver)
   const plotWidth = 980;
@@ -281,6 +288,80 @@ export default function DataAnalysisPage() {
       setExportLoading(false);
     }
   };
+  // Database error recovery functions
+  const handleDatabaseError = async (error: Error, context: string) => {
+    console.error(`Database error in ${context}:`, error);
+    
+    const errorMessage = error.message || String(error);
+    const isConnectionError = errorMessage.includes('index out of bounds') ||
+                             errorMessage.includes('indirect call to null') ||
+                             errorMessage.includes('connection') ||
+                             errorMessage.includes('RuntimeError');
+
+    if (isConnectionError && dbRetryCount < maxRetries) {
+      console.log(`Attempting recovery (${dbRetryCount + 1}/${maxRetries})`);
+      setIsRecovering(true);
+      setDbRetryCount(prev => prev + 1);
+      
+      try {
+        // Clear caches to avoid stale state
+        queryCache.clear();
+        
+        // Force connection refresh
+        const refreshedConnection = await connectionManager.refreshConnection();
+        
+        if (refreshedConnection) {
+          console.log('Connection recovered successfully');
+          setDbError(null);
+          setIsRecovering(false);
+          return true; // Recovery successful
+        } else {
+          throw new Error('Failed to refresh connection');
+        }
+      } catch (recoveryError) {
+        console.error('Recovery failed:', recoveryError);
+        setDbError(`Database connection failed. Attempt ${dbRetryCount + 1}/${maxRetries}`);
+        setIsRecovering(false);
+        return false;
+      }
+    } else {
+      // Max retries exceeded or non-recoverable error
+      const finalError = dbRetryCount >= maxRetries 
+        ? 'Database connection failed after multiple attempts. Please refresh the page.'
+        : `Database error: ${errorMessage}`;
+      
+      setDbError(finalError);
+      setIsRecovering(false);
+      return false;
+    }
+  };
+
+  const resetErrorState = () => {
+    setDbError(null);
+    setDbRetryCount(0);
+    setIsRecovering(false);
+  };
+
+  const forceRefreshDatabase = async () => {
+    setIsRecovering(true);
+    resetErrorState();
+    
+    try {
+      queryCache.clear();
+      const refreshedConnection = await connectionManager.refreshConnection();
+      
+      if (refreshedConnection) {
+        console.log('Manual database refresh successful');
+        setIsRecovering(false);
+      } else {
+        throw new Error('Failed to refresh connection');
+      }
+    } catch (error) {
+      console.error('Manual refresh failed:', error);
+      setDbError('Manual refresh failed. Please reload the page.');
+      setIsRecovering(false);
+    }
+  };
 
   // ===== QA & DEV TOOLS (Development Mode Only) =====
   const isDev = process.env.NODE_ENV === 'development';
@@ -406,6 +487,7 @@ export default function DataAnalysisPage() {
     }
   }, [db, connection]);
 
+  // Handle database loading and error states
   if (!db) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -414,6 +496,58 @@ export default function DataAnalysisPage() {
           <p className="text-gray-600">Loading database...</p>
         </div>
       </div>
+    );
+  }
+
+  // Handle database errors with recovery options
+  if (dbError) {
+    return (
+      <>
+        <Header />
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center max-w-md mx-auto p-6">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+              <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.232 15.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-semibold text-red-800 mb-2">Database Connection Error</h2>
+              <p className="text-red-700 mb-4">{dbError}</p>
+              
+              <div className="space-y-3">
+                {dbRetryCount < maxRetries && (
+                  <button
+                    onClick={forceRefreshDatabase}
+                    disabled={isRecovering}
+                    className={`w-full px-4 py-2 rounded-md text-white ${
+                      isRecovering 
+                        ? 'bg-gray-400 cursor-not-allowed' 
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  >
+                    {isRecovering ? 'Reconnecting...' : 'Try Reconnecting'}
+                  </button>
+                )}
+                
+                <button
+                  onClick={() => window.location.reload()}
+                  className="w-full px-4 py-2 rounded-md bg-gray-600 text-white hover:bg-gray-700"
+                >
+                  Reload Page
+                </button>
+                
+                <div className="text-xs text-gray-600 mt-4">
+                  <p>Connection attempts: {dbRetryCount}/{maxRetries}</p>
+                  {connectionManager && (
+                    <p>Manager stats: {JSON.stringify(connectionManager.getStats())}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
     );
   }
 
@@ -465,15 +599,20 @@ export default function DataAnalysisPage() {
         {/* Overview / Time selection */}
         <section className="space-y-2">
           <div className="text-sm text-gray-600">Overview — brush to filter all views, scroll/drag to pan/zoom</div>
-          <OverviewHistogram
-            db={db}
-            table={tableName}
-            start={start}
-            end={end}
-            width={plotWidth}
-            height={120}
-            crossFilterName="cf"
-          />
+          <DatabaseErrorBoundary 
+            fallbackMessage="Overview histogram failed to load"
+            onError={(error) => handleDatabaseError(error, 'OverviewHistogram')}
+          >
+            <OverviewHistogram
+              db={db}
+              table={tableName}
+              start={start}
+              end={end}
+              width={plotWidth}
+              height={120}
+              crossFilterName="cf"
+            />
+          </DatabaseErrorBoundary>
         </section>
 
         {/* Controls + Time series */}
@@ -490,19 +629,24 @@ export default function DataAnalysisPage() {
           </div>
           <div className="col-span-12 lg:col-span-9 space-y-2">
             <div className="text-sm text-gray-600">Time series — toggle metrics, dual/normalize, overlay/facet</div>
-            <TimeSeriesPanel
-              db={db}
-              table={tableName}
-              metrics={overlayMetrics}
-              axisMode={axisMode}
-              overlayMode={overlayMode}
-              start={start}
-              end={end}
-              anomaly={anomaly}
-              width={plotWidth}
-              height={280}
-              crossFilterName="cf"
-            />
+            <DatabaseErrorBoundary 
+              fallbackMessage="Time series panel failed to load"
+              onError={(error) => handleDatabaseError(error, 'TimeSeriesPanel')}
+            >
+              <TimeSeriesPanel
+                db={db}
+                table={tableName}
+                metrics={overlayMetrics}
+                axisMode={axisMode}
+                overlayMode={overlayMode}
+                start={start}
+                end={end}
+                anomaly={anomaly}
+                width={plotWidth}
+                height={280}
+                crossFilterName="cf"
+              />
+            </DatabaseErrorBoundary>
           </div>
         </section>
 
@@ -556,14 +700,19 @@ export default function DataAnalysisPage() {
           </div>
           <div className="col-span-12 lg:col-span-9 space-y-2">
             <div className="text-sm text-gray-600">Correlation — lasso to filter; switch to heatmap when dense</div>
-            <ScatterPanel
-              db={db}
-              table={tableName}
-              state={scatter}
-              width={plotWidth}
-              height={260}
-              crossFilterName="cf"
-            />
+            <DatabaseErrorBoundary 
+              fallbackMessage="Scatter panel failed to load"
+              onError={(error) => handleDatabaseError(error, 'ScatterPanel')}
+            >
+              <ScatterPanel
+                db={db}
+                table={tableName}
+                state={scatter}
+                width={plotWidth}
+                height={260}
+                crossFilterName="cf"
+              />
+            </DatabaseErrorBoundary>
           </div>
         </section>
 
