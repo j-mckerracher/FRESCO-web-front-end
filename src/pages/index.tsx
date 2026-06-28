@@ -1,3 +1,4 @@
+import DataHoldoutBanner from "@/components/DataHoldoutBanner";
 import Hero from "@/components/landing/Hero";
 import Header from "../components/Header";
 import Image from "next/image";
@@ -8,6 +9,7 @@ import { Analytics } from '@vercel/analytics/next';// import MainSection from ".
 const Home = () => {
   return (
     <div className="bg-black min-h-screen flex flex-col">
+      <DataHoldoutBanner />
       <Header />
       <Hero />
       {/* <section className="text-white py-16">
