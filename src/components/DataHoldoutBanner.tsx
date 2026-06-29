@@ -13,8 +13,8 @@ const DataHoldoutBanner: React.FC = () => {
         <p className="m-0">
           Temporary Data Holdout: Certain FRESCO data partitions are currently
           reserved as blind evaluation data for the active IEEE Global Student
-          Challenge 2026. The complete dataset will be reinstated after the
-          event.{" "}
+          Challenge 2026. The complete dataset will be reinstated December 12th,
+          2026{" "}
           <a
             href="https://www.computer.org/publications/tech-news/events/global-student-challenge-2026"
             target="_blank"
